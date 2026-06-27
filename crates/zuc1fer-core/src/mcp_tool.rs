@@ -31,7 +31,7 @@ impl Tool for McpTool {
         }
     }
 
-    async fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, call: &ToolCall, _ctx: &ToolContext) -> anyhow::Result<ToolResult> {
         match self.bridge.execute(&self.tool_info.name, call.arguments.clone()).await {
             Ok(result) => {
                 let content: String = result

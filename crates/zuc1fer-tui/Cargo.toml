@@ -9,6 +9,11 @@ tokio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+ratatui = "0.29"
+crossterm = "0.28"
 
 zuc1fer-core = { path = "../zuc1fer-core" }
 zuc1fer-llm = { path = "../zuc1fer-llm" }
