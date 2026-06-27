@@ -148,6 +148,9 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
 
         if crossterm::event::poll(std::time::Duration::from_millis(50))? {
             if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
+                if key.kind != crossterm::event::KeyEventKind::Press {
+                    continue;
+                }
                 if key.code == crossterm::event::KeyCode::Enter && !app.input.is_empty() && !app.streaming {
                     let prompt = app.input.clone();
                     app.input.clear();
