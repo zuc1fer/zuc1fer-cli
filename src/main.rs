@@ -45,6 +45,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     };
     use ratatui::backend::CrosstermBackend;
     use ratatui::Terminal;
+    use std::sync::Arc;
     use zuc1fer_tui::{App, ChatLine};
 
     let working_dir = std::env::current_dir()?;
@@ -61,14 +62,16 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     let (text_tx, mut text_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let (debug_tx, mut debug_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (prompt_tx, mut prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (done_tx, mut done_rx) = tokio::sync::mpsc::unbounded_channel::<bool>();
 
-    let agent = rt.block_on(Agent::new(config, working_dir.clone()))?.with_tui(text_tx, debug_tx);
-
-    let mut session = Session::new(
+    let agent = rt.block_on(Agent::new(config, working_dir.clone()))?.with_tui(text_tx.clone(), debug_tx.clone());
+    let agent = Arc::new(agent);
+    let session = Arc::new(tokio::sync::Mutex::new(Session::new(
         uuid::Uuid::new_v4().to_string(),
         working_dir.display().to_string(),
         model.clone(),
-    );
+    )));
 
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -80,10 +83,61 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
 
     loop {
         while let Ok(text) = text_rx.try_recv() {
-            app.add_message(ChatLine::Assistant(text));
+            if text.starts_with("__TOKENS__:") {
+                if let Some(rest) = text.strip_prefix("__TOKENS__:") {
+                    let parts: Vec<&str> = rest.split(':').collect();
+                    if parts.len() == 2 {
+                        app.tokens_in = parts[0].parse().unwrap_or(0);
+                        app.tokens_out = parts[1].parse().unwrap_or(0);
+                    }
+                }
+            } else if text.starts_with("__ERROR__:") {
+                if let Some(err) = text.strip_prefix("__ERROR__:") {
+                    app.add_message(ChatLine::Error(err.to_string()));
+                }
+            } else if app.streaming {
+                app.stream_buffer.push_str(&text);
+            } else {
+                app.add_message(ChatLine::Assistant(text));
+            }
         }
         while let Ok(dbg) = debug_rx.try_recv() {
-            app.add_message(ChatLine::Status(dbg));
+            if dbg.contains("Running") || dbg.contains("Error") || dbg.contains("retrying") {
+                app.add_message(ChatLine::Status(dbg));
+            }
+        }
+        while let Ok(prompt) = prompt_rx.try_recv() {
+            let agent_clone = agent.clone();
+            let session_clone = session.clone();
+            let text_tx_clone = text_tx.clone();
+            let done_tx_clone = done_tx.clone();
+
+            app.streaming = true;
+            app.stream_buffer.clear();
+
+            rt.spawn(async move {
+                let mut s = session_clone.lock().await;
+                let result = agent_clone.run(&mut s, &prompt).await;
+                match result {
+                    Ok(response) => {
+                        if let Some(usage) = &response.usage {
+                            let _ = text_tx_clone.send(format!("__TOKENS__:{}:{}", usage.prompt_tokens, usage.completion_tokens));
+                        }
+                    }
+                    Err(e) => {
+                        let _ = text_tx_clone.send(format!("__ERROR__:{}", e));
+                    }
+                }
+                let _ = done_tx_clone.send(true);
+            });
+        }
+        while let Ok(_) = done_rx.try_recv() {
+            if app.streaming && !app.stream_buffer.is_empty() {
+                let buf = std::mem::take(&mut app.stream_buffer);
+                app.add_message(ChatLine::Assistant(buf));
+            }
+            app.streaming = false;
+            app.status = "Ready".into();
         }
 
         terminal.draw(|f| zuc1fer_tui::draw(f, &app))?;
@@ -94,29 +148,13 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
 
         if crossterm::event::poll(std::time::Duration::from_millis(50))? {
             if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
-                if key.code == crossterm::event::KeyCode::Enter && !app.input.is_empty() {
+                if key.code == crossterm::event::KeyCode::Enter && !app.input.is_empty() && !app.streaming {
                     let prompt = app.input.clone();
                     app.input.clear();
                     app.cursor = 0;
                     app.add_message(ChatLine::User(prompt.clone()));
                     app.status = "Thinking...".into();
-                    terminal.draw(|f| zuc1fer_tui::draw(f, &app))?;
-
-                    let result = rt.block_on(agent.run(&mut session, &prompt));
-
-                    match result {
-                        Ok(response) => {
-                            app.status = "Ready".into();
-                            if let Some(usage) = &response.usage {
-                                app.tokens_in = usage.prompt_tokens;
-                                app.tokens_out = usage.completion_tokens;
-                            }
-                        }
-                        Err(e) => {
-                            app.add_message(ChatLine::Error(e.to_string()));
-                            app.status = "Error".into();
-                        }
-                    }
+                    let _ = prompt_tx.send(prompt);
                 } else {
                     app.handle_key(key);
                 }

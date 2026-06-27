@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 use std::collections::VecDeque;
@@ -18,13 +18,13 @@ pub struct App {
     pub tokens_out: u64,
     pub scroll: usize,
     pub running: bool,
+    pub streaming: bool,
+    pub stream_buffer: String,
 }
 
 pub enum ChatLine {
     User(String),
     Assistant(String),
-    ToolProgress(String),
-    ToolResult(String),
     Status(String),
     Error(String),
 }
@@ -41,49 +41,44 @@ impl App {
             tokens_out: 0,
             scroll: 0,
             running: true,
+            streaming: false,
+            stream_buffer: String::new(),
         }
     }
 
     pub fn add_message(&mut self, line: ChatLine) {
         self.messages.push_back(line);
-        if self.messages.len() > 1000 {
+        if self.messages.len() > 500 {
             self.messages.pop_front();
         }
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Enter => {
-                if !self.input.is_empty() {
-                    self.add_message(ChatLine::User(self.input.clone()));
-                    self.input.clear();
-                    self.cursor = 0;
-                }
-            }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.running = false;
             }
-            KeyCode::Char(c) => {
+            KeyCode::Char(c) if !self.streaming => {
                 self.input.insert(self.cursor, c);
                 self.cursor += 1;
             }
-            KeyCode::Backspace => {
+            KeyCode::Backspace if !self.streaming => {
                 if self.cursor > 0 {
                     self.input.remove(self.cursor - 1);
                     self.cursor -= 1;
                 }
             }
-            KeyCode::Delete => {
+            KeyCode::Delete if !self.streaming => {
                 if self.cursor < self.input.len() {
                     self.input.remove(self.cursor);
                 }
             }
-            KeyCode::Left => {
+            KeyCode::Left if !self.streaming => {
                 if self.cursor > 0 {
                     self.cursor -= 1;
                 }
             }
-            KeyCode::Right => {
+            KeyCode::Right if !self.streaming => {
                 if self.cursor < self.input.len() {
                     self.cursor += 1;
                 }
@@ -91,10 +86,10 @@ impl App {
             KeyCode::Home => self.cursor = 0,
             KeyCode::End => self.cursor = self.input.len(),
             KeyCode::PageUp => {
-                self.scroll = self.scroll.saturating_add(5);
+                self.scroll = self.scroll.saturating_add(3);
             }
             KeyCode::PageDown => {
-                self.scroll = self.scroll.saturating_sub(5);
+                self.scroll = self.scroll.saturating_sub(3);
             }
             _ => {}
         }
@@ -117,98 +112,99 @@ pub fn draw(frame: &mut Frame, app: &App) {
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
-    let text = Span::styled(
+    let header = Span::styled(
         format!(
             " zuc1fer | {} | in:{} out:{} | {}",
             app.model, app.tokens_in, app.tokens_out, app.status
         ),
         Style::default()
             .fg(Color::Black)
-            .bg(Color::DarkGray)
+            .bg(Color::Gray)
             .add_modifier(Modifier::BOLD),
     );
-    frame.render_widget(Paragraph::new(text), area);
+    let p = Paragraph::new(header);
+    frame.render_widget(p, area);
 }
 
 fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
-    let items: Vec<ListItem> = app
+    let mut lines: Vec<Line> = Vec::new();
+
+    let visible = app
         .messages
         .iter()
         .rev()
         .skip(app.scroll)
-        .take(area.height as usize)
-        .rev()
-        .map(|line| match line {
+        .take(area.height.saturating_sub(2) as usize);
+
+    for msg in visible.rev() {
+        match msg {
             ChatLine::User(text) => {
-                let content = vec![Line::from(vec![
-                    Span::styled("> ", Style::default().fg(Color::Cyan)),
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "> ",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(text, Style::default().fg(Color::White)),
-                ])];
-                ListItem::new(content)
+                ]));
             }
             ChatLine::Assistant(text) => {
-                let lines: Vec<Line> = text
-                    .lines()
-                    .map(|l| Line::from(vec![Span::styled(l, Style::default().fg(Color::Green))]))
-                    .collect();
-                ListItem::new(lines)
-            }
-            ChatLine::ToolProgress(text) => {
-                let content = vec![Line::from(vec![Span::styled(
-                    format!("  ⚙ {text}"),
-                    Style::default().fg(Color::Yellow),
-                )])];
-                ListItem::new(content)
-            }
-            ChatLine::ToolResult(text) => {
-                let lines: Vec<Line> = text
-                    .lines()
-                    .take(4)
-                    .map(|l| {
-                        Line::from(vec![Span::styled(
-                            format!("    {l}"),
-                            Style::default().fg(Color::DarkGray),
-                        )])
-                    })
-                    .collect();
-                ListItem::new(lines)
+                for line in text.lines() {
+                    lines.push(Line::from(vec![Span::styled(
+                        line,
+                        Style::default().fg(Color::Green),
+                    )]));
+                }
             }
             ChatLine::Status(text) => {
-                let content = vec![Line::from(vec![Span::styled(
-                    format!("  — {text}"),
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  ─ {text}"),
                     Style::default().fg(Color::DarkGray),
-                )])];
-                ListItem::new(content)
+                )]));
             }
             ChatLine::Error(text) => {
-                let content = vec![Line::from(vec![Span::styled(
+                lines.push(Line::from(vec![Span::styled(
                     format!("  ✗ {text}"),
                     Style::default().fg(Color::Red),
-                )])];
-                ListItem::new(content)
+                )]));
             }
-        })
-        .collect();
+        }
+        lines.push(Line::from(""));
+    }
 
-    let messages = List::new(items).block(Block::default().borders(Borders::NONE));
-    frame.render_widget(messages, area);
+    if app.streaming && !app.stream_buffer.is_empty() {
+        for line in app.stream_buffer.lines() {
+            lines.push(Line::from(vec![Span::styled(
+                line,
+                Style::default().fg(Color::Green),
+            )]));
+        }
+    }
+
+    let paragraph = Paragraph::new(lines).scroll((0, 0));
+    frame.render_widget(paragraph, area);
 }
 
 fn draw_input(frame: &mut Frame, area: Rect, app: &App) {
-    let prompt = format!("> {}", app.input);
-    let cursor_pos = app.cursor + 2;
+    let indicator = if app.streaming { "⏳" } else { ">" };
+    let prompt = format!("{indicator} {}", app.input);
 
     let block = Block::default()
         .borders(Borders::TOP)
         .border_style(Style::default().fg(Color::DarkGray));
 
-    let paragraph = Paragraph::new(prompt)
-        .block(block)
-        .style(Style::default().fg(Color::White));
+    let style = if app.streaming {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    let paragraph = Paragraph::new(prompt).block(block).style(style);
 
     frame.render_widget(paragraph, area);
 
-    if app.cursor < app.input.len() || app.input.is_empty() {
-        frame.set_cursor_position((area.x + cursor_pos as u16, area.y + 1));
+    if !app.streaming {
+        frame.set_cursor_position((area.x + app.cursor as u16 + 2, area.y + 1));
     }
 }
