@@ -1,6 +1,8 @@
 use zuc1fer_core::agent::Agent;
 use zuc1fer_core::config::Config;
 use zuc1fer_core::session::Session;
+use zuc1fer_core::session_store::SessionStore;
+use std::sync::Arc;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -26,6 +28,31 @@ pub fn main() -> anyhow::Result<()> {
             }
         }
         "models" => list_models()?,
+        "sessions" => list_sessions()?,
+        "session" if args.len() >= 3 => {
+            match args[2].as_str() {
+                "resume" if args.len() >= 4 => resume_session(&args[3])?,
+                "delete" if args.len() >= 4 => {
+                    let store = open_store()?;
+                    store.delete(&args[3])?;
+                    println!("Session {} deleted.", args[3]);
+                }
+                "info" if args.len() >= 4 => {
+                    let store = open_store()?;
+                    if let Some(s) = store.load(&args[3])? {
+                        println!("Session: {}", s.id);
+                        println!("Model: {}", s.model);
+                        println!("Dir: {}", s.working_dir);
+                        println!("Messages: {}", s.messages.len());
+                        println!("Tokens: {}", s.total_tokens);
+                        println!("Created: {}", s.created_at);
+                    } else {
+                        println!("Session not found.");
+                    }
+                }
+                cmd => eprintln!("Unknown session command: {cmd}. Use: sessions, session resume <id>, session delete <id>, session info <id>"),
+            }
+        }
         "config" => show_config()?,
         "--version" | "-V" => println!("zuc1fer v{VERSION}"),
         "--help" | "-h" => print_usage(&args[0]),
@@ -65,7 +92,9 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     let (prompt_tx, mut prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let (done_tx, mut done_rx) = tokio::sync::mpsc::unbounded_channel::<bool>();
 
-    let agent = rt.block_on(Agent::new(config, working_dir.clone()))?.with_tui(text_tx.clone(), debug_tx.clone());
+    let agent = rt.block_on(Agent::new(config, working_dir.clone()))?
+        .with_tui(text_tx.clone(), debug_tx.clone())
+        .with_session_store(Arc::new(open_store()?));
     let agent = Arc::new(agent);
     let session = Arc::new(tokio::sync::Mutex::new(Session::new(
         uuid::Uuid::new_v4().to_string(),
@@ -203,7 +232,8 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
     }
 
     let rt = tokio::runtime::Runtime::new()?;
-    let agent = rt.block_on(Agent::new(config, working_dir.clone()))?;
+    let agent = rt.block_on(Agent::new(config, working_dir.clone()))?
+        .with_session_store(Arc::new(open_store()?));
     let mut session = Session::new(
         uuid::Uuid::new_v4().to_string(),
         working_dir.display().to_string(),
@@ -326,6 +356,69 @@ fn list_models() -> anyhow::Result<()> {
     println!("Available models:");
     for m in agent.list_models() {
         println!("  - {m}");
+    }
+    Ok(())
+}
+
+fn open_store() -> anyhow::Result<SessionStore> {
+    let dir = zuc1fer_core::default_data_dir()?;
+    let db_path = dir.join("sessions.db");
+    SessionStore::new(&db_path)
+}
+
+fn list_sessions() -> anyhow::Result<()> {
+    let store = open_store()?;
+    let sessions = store.list()?;
+    if sessions.is_empty() {
+        println!("No saved sessions.");
+        return Ok(());
+    }
+    println!("{:<36} {:<30} {:>6} {:>8}  {}", "ID", "MODEL", "MSGS", "TOKENS", "UPDATED");
+    for s in &sessions {
+        println!(
+            "{:<36} {:<30} {:>6} {:>8}  {}",
+            &s.id[..s.id.len().min(34)],
+            &s.model[..s.model.len().min(28)],
+            s.message_count,
+            s.total_tokens,
+            &s.updated_at[..s.updated_at.len().min(19)],
+        );
+    }
+    Ok(())
+}
+
+fn resume_session(id: &str) -> anyhow::Result<()> {
+    let store = open_store()?;
+    let session = match store.load(id)? {
+        Some(s) => s,
+        None => {
+            eprintln!("Session '{id}' not found.");
+            return Ok(());
+        }
+    };
+    let config = Config::load()?;
+    let rt = tokio::runtime::Runtime::new()?;
+    let agent = rt.block_on(Agent::new(config, std::env::current_dir()?))?.with_session_store(Arc::new(store));
+
+    println!("Resumed session: {} ({} messages, {} tokens)", id, session.messages.len(), session.total_tokens);
+
+    let mut session = session;
+    loop {
+        print!("> ");
+        use std::io::Write;
+        std::io::stdout().flush()?;
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        let input = input.trim().to_string();
+
+        if input.is_empty() { continue; }
+        if input == "/quit" || input == "/exit" || input == "/q" { break; }
+
+        let result = rt.block_on(agent.run(&mut session, &input));
+        match result {
+            Err(e) => eprintln!("Error: {e}"),
+            _ => {}
+        }
     }
     Ok(())
 }

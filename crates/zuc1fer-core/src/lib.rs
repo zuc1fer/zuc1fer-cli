@@ -4,6 +4,7 @@ pub mod mcp_bridge;
 pub mod mcp_tool;
 pub mod repomap;
 pub mod session;
+pub mod session_store;
 
 use anyhow::Context;
 use std::path::PathBuf;

@@ -3,6 +3,7 @@ use crate::mcp_bridge::McpBridge;
 use crate::mcp_tool::McpTool;
 use crate::repomap::RepoMap;
 use crate::session::{Session, SessionMessage};
+use crate::session_store::SessionStore;
 use std::sync::Arc;
 use std::time::Duration;
 use zuc1fer_llm::{
@@ -53,6 +54,7 @@ pub struct Agent {
     #[allow(dead_code)]
     mcp_bridges: Vec<Arc<McpBridge>>,
     tui: Option<TuiOutput>,
+    session_store: Option<Arc<SessionStore>>,
 }
 
 impl Agent {
@@ -146,11 +148,17 @@ impl Agent {
             repomap: Some(repomap),
             mcp_bridges,
             tui: None,
+            session_store: None,
         })
     }
 
     pub fn with_tui(mut self, text_tx: tokio::sync::mpsc::UnboundedSender<String>, debug_tx: tokio::sync::mpsc::UnboundedSender<String>) -> Self {
         self.tui = Some(TuiOutput { text_tx, debug_tx });
+        self
+    }
+
+    pub fn with_session_store(mut self, store: Arc<SessionStore>) -> Self {
+        self.session_store = Some(store);
         self
     }
 
@@ -494,6 +502,21 @@ impl Agent {
             });
 
             session.total_tokens = accumulated_usage.total_tokens;
+            self.save_session(session);
+        }
+    }
+
+    fn save_session(&self, session: &Session) {
+        if let Some(ref store) = self.session_store {
+            if let Err(e) = store.save(
+                &session.id,
+                &session.model,
+                &session.working_dir,
+                &session.messages,
+                session.total_tokens,
+            ) {
+                tracing::warn!("Failed to save session: {e}");
+            }
         }
     }
 }
