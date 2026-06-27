@@ -1,3 +1,4 @@
+pub mod ast_grep;
 pub mod bash;
 pub mod edit;
 pub mod glob;

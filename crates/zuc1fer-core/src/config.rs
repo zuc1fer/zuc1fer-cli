@@ -42,6 +42,20 @@ impl Default for Config {
                 base_url: None,
             },
         );
+        providers.insert(
+            "openrouter".into(),
+            ProviderConfig {
+                api_key: std::env::var("OPENROUTER_API_KEY").unwrap_or_default(),
+                base_url: None,
+            },
+        );
+        providers.insert(
+            "ollama".into(),
+            ProviderConfig {
+                api_key: "".into(),
+                base_url: Some("http://localhost:11434".into()),
+            },
+        );
 
         Self {
             model: "deepseek/deepseek-chat".into(),
