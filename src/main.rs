@@ -68,12 +68,19 @@ pub fn main() -> anyhow::Result<()> {
 fn run_tui(args: &[String]) -> anyhow::Result<()> {
     use crossterm::{
         execute,
-        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen, Clear, ClearType},
     };
     use ratatui::backend::CrosstermBackend;
     use ratatui::Terminal;
     use std::sync::Arc;
     use zuc1fer_tui::{App, ChatLine};
+
+    let orig_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = disable_raw_mode();
+        let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+        orig_hook(info);
+    }));
 
     let working_dir = std::env::current_dir()?;
     let mut config = Config::load()?;
@@ -104,7 +111,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
 
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, Clear(ClearType::All), EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -195,7 +202,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     }
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(terminal.backend_mut(), Clear(ClearType::All), LeaveAlternateScreen)?;
 
     Ok(())
 }
