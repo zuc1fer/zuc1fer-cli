@@ -293,19 +293,7 @@ impl Agent {
                         }
                     }
                     Ok(Err(e)) => {
-                        let msg = e.to_string().to_lowercase();
-                        let is_transient = msg.contains("timed out")
-                            || msg.contains("connection")
-                            || msg.contains("reset")
-                            || msg.contains("refused")
-                            || msg.contains("broken pipe")
-                            || msg.contains("service unavailable")
-                            || msg.contains("too many requests")
-                            || msg.contains("503")
-                            || msg.contains("502")
-                            || msg.contains("504")
-                            || msg.contains("429");
-                        if !is_transient || retry == MAX_RETRIES - 1 {
+                        if retry == MAX_RETRIES - 1 {
                             eprintln!("\nProvider error: {e}");
                             return Ok(AgentResponse {
                                 text: text_buf,
