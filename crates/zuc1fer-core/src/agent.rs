@@ -78,6 +78,22 @@ impl Agent {
                         }
                         provider_registry.register(Box::new(p));
                     }
+                    "openrouter" => {
+                        if !provider_config.api_key.is_empty() {
+                            provider_registry.register(Box::new(
+                                zuc1fer_llm::providers::openrouter::OpenRouterProvider::new(
+                                    provider_config.api_key.clone(),
+                                ),
+                            ));
+                        }
+                    }
+                    "ollama" => {
+                        let mut p = zuc1fer_llm::providers::ollama::OllamaProvider::new();
+                        if let Some(ref url) = provider_config.base_url {
+                            p = p.with_base_url(url);
+                        }
+                        provider_registry.register(Box::new(p));
+                    }
                     _ => {
                         tracing::warn!("Unknown provider: {name}");
                     }
