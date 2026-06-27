@@ -1,0 +1,55 @@
+[package]
+name = "zuc1fer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "zuc1fer"
+path = "src/main.rs"
+
+[dependencies]
+zuc1fer-core = { path = "crates/zuc1fer-core" }
+zuc1fer-llm = { path = "crates/zuc1fer-llm" }
+zuc1fer-tools = { path = "crates/zuc1fer-tools" }
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/zuc1fer-core",
+    "crates/zuc1fer-tools",
+    "crates/zuc1fer-llm",
+    "crates/zuc1fer-search",
+    "crates/zuc1fer-tui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["zuc1fer"]
+repository = "https://github.com/zuc1fer/zuc1fer-cli"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+regex = "1"
+async-trait = "0.1"
+reqwest = { version = "0.12", features = ["stream", "json", "rustls-tls"], default-features = false }
+secrecy = { version = "0.10", features = ["serde"] }
+tokio-util = "0.7"
+dirs = "6"
+toml = "0.8"
