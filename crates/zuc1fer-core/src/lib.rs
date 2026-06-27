@@ -1,5 +1,7 @@
 pub mod agent;
 pub mod config;
+pub mod mcp_bridge;
+pub mod mcp_tool;
 pub mod repomap;
 pub mod session;
 

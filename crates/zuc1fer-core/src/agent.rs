@@ -1,4 +1,6 @@
 use crate::config::Config;
+use crate::mcp_bridge::McpBridge;
+use crate::mcp_tool::McpTool;
 use crate::repomap::RepoMap;
 use crate::session::{Session, SessionMessage};
 use std::sync::Arc;
@@ -43,12 +45,14 @@ pub struct Agent {
     tool_registry: ToolRegistry,
     working_dir: std::path::PathBuf,
     repomap: Option<RepoMap>,
+    #[allow(dead_code)]
+    mcp_bridges: Vec<Arc<McpBridge>>,
 }
 
 impl Agent {
-    pub fn new(config: Config, working_dir: std::path::PathBuf) -> Self {
+    pub async fn new(config: Config, working_dir: std::path::PathBuf) -> anyhow::Result<Self> {
         let mut provider_registry = ProviderRegistry::new();
-        let tool_registry = ToolRegistry::new();
+        let mut tool_registry = ToolRegistry::new();
 
         for (name, provider_config) in &config.providers {
             if !provider_config.api_key.is_empty() {
@@ -106,13 +110,36 @@ impl Agent {
         let mut repomap = RepoMap::new(working_dir.clone(), 1024);
         let _ = repomap.build();
 
-        Self {
+        let mut mcp_bridges = Vec::new();
+        for server in &config.mcp {
+            if !server.enabled {
+                continue;
+            }
+            match McpBridge::connect(&server.command, &server.args).await {
+                Ok(bridge) => {
+                    let bridge = Arc::new(bridge);
+                    let server_name = bridge.server_name().to_string();
+                    let tool_infos: Vec<_> = bridge.tools_info().to_vec();
+                    for ti in tool_infos {
+                        let mcp_tool = McpTool::new(bridge.clone(), ti, &server_name);
+                        tool_registry.register(Arc::new(mcp_tool));
+                    }
+                    mcp_bridges.push(bridge);
+                }
+                Err(e) => {
+                    tracing::warn!("MCP server '{}' failed to connect: {e}", server.command);
+                }
+            }
+        }
+
+        Ok(Self {
             config,
             provider_registry,
             tool_registry,
             working_dir,
             repomap: Some(repomap),
-        }
+            mcp_bridges,
+        })
     }
 
     pub fn add_tool(&mut self, tool: Arc<dyn zuc1fer_tools::Tool>) {

@@ -10,12 +10,23 @@ pub struct Config {
     pub temperature: Option<f32>,
     pub system_prompt: Option<String>,
     pub safe_mode: bool,
+    #[serde(default)]
+    pub mcp: Vec<McpServerConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
     pub api_key: String,
     pub base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 impl Default for Config {
@@ -65,6 +76,7 @@ impl Default for Config {
             temperature: None,
             system_prompt: None,
             safe_mode: false,
+            mcp: Vec::new(),
         }
     }
 }

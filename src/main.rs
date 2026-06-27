@@ -62,14 +62,13 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
         );
     }
 
-    let agent = Agent::new(config, working_dir.clone());
+    let rt = tokio::runtime::Runtime::new()?;
+    let agent = rt.block_on(Agent::new(config, working_dir.clone()))?;
     let mut session = Session::new(
         uuid::Uuid::new_v4().to_string(),
         working_dir.display().to_string(),
         model.clone(),
     );
-
-    let rt = tokio::runtime::Runtime::new()?;
 
     if let Some(prompt) = one_shot_prompt {
         println!("zuc1fer v{VERSION}  |  model: {}", session.model);
@@ -181,7 +180,8 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
 fn list_models() -> anyhow::Result<()> {
     let config = Config::load()?;
     let working_dir = std::env::current_dir()?;
-    let agent = Agent::new(config, working_dir);
+    let rt = tokio::runtime::Runtime::new()?;
+    let agent = rt.block_on(Agent::new(config, working_dir))?;
 
     println!("Available models:");
     for m in agent.list_models() {
