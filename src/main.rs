@@ -17,7 +17,14 @@ pub fn main() -> anyhow::Result<()> {
     }
 
     match args[1].as_str() {
-        "chat" | "run" => run_interactive(&args)?,
+        "chat" | "run" => {
+            let use_tui = args.iter().any(|a| a == "--tui");
+            if use_tui {
+                run_tui(&args)?
+            } else {
+                run_interactive(&args)?
+            }
+        }
         "models" => list_models()?,
         "config" => show_config()?,
         "--version" | "-V" => println!("zuc1fer v{VERSION}"),
@@ -27,6 +34,98 @@ pub fn main() -> anyhow::Result<()> {
             print_usage(&args[0]);
         }
     }
+
+    Ok(())
+}
+
+fn run_tui(args: &[String]) -> anyhow::Result<()> {
+    use crossterm::{
+        execute,
+        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    };
+    use ratatui::backend::CrosstermBackend;
+    use ratatui::Terminal;
+    use zuc1fer_tui::{App, ChatLine};
+
+    let working_dir = std::env::current_dir()?;
+    let mut config = Config::load()?;
+
+    for arg in args.iter().skip(2) {
+        if let Some(model) = arg.strip_prefix("--model=") {
+            config.model = model.to_string();
+        }
+    }
+
+    let model = config.model.clone();
+
+    let rt = tokio::runtime::Runtime::new()?;
+    let (text_tx, mut text_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (debug_tx, mut debug_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+    let agent = rt.block_on(Agent::new(config, working_dir.clone()))?.with_tui(text_tx, debug_tx);
+
+    let mut session = Session::new(
+        uuid::Uuid::new_v4().to_string(),
+        working_dir.display().to_string(),
+        model.clone(),
+    );
+
+    enable_raw_mode()?;
+    let mut stdout = std::io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let mut app = App::new(&model);
+
+    loop {
+        while let Ok(text) = text_rx.try_recv() {
+            app.add_message(ChatLine::Assistant(text));
+        }
+        while let Ok(dbg) = debug_rx.try_recv() {
+            app.add_message(ChatLine::Status(dbg));
+        }
+
+        terminal.draw(|f| zuc1fer_tui::draw(f, &app))?;
+
+        if !app.running {
+            break;
+        }
+
+        if crossterm::event::poll(std::time::Duration::from_millis(50))? {
+            if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
+                if key.code == crossterm::event::KeyCode::Enter && !app.input.is_empty() {
+                    let prompt = app.input.clone();
+                    app.input.clear();
+                    app.cursor = 0;
+                    app.add_message(ChatLine::User(prompt.clone()));
+                    app.status = "Thinking...".into();
+                    terminal.draw(|f| zuc1fer_tui::draw(f, &app))?;
+
+                    let result = rt.block_on(agent.run(&mut session, &prompt));
+
+                    match result {
+                        Ok(response) => {
+                            app.status = "Ready".into();
+                            if let Some(usage) = &response.usage {
+                                app.tokens_in = usage.prompt_tokens;
+                                app.tokens_out = usage.completion_tokens;
+                            }
+                        }
+                        Err(e) => {
+                            app.add_message(ChatLine::Error(e.to_string()));
+                            app.status = "Error".into();
+                        }
+                    }
+                } else {
+                    app.handle_key(key);
+                }
+            }
+        }
+    }
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
 
     Ok(())
 }
@@ -209,15 +308,15 @@ fn show_config() -> anyhow::Result<()> {
 fn print_usage(bin: &str) {
     println!("zuc1fer v{VERSION} — the coding agent CLI\n");
     println!("Usage:");
-    println!("  {bin} chat [--model=provider/model] [--safe]");
+    println!("  {bin} chat [--model=provider/model] [--tui] [--safe]");
     println!("  {bin} models");
     println!("  {bin} config");
     println!("  {bin} --version");
     println!();
     println!("Examples:");
     println!("  {bin} chat --model=deepseek/deepseek-chat");
-    println!("  {bin} chat --model=anthropic/claude-sonnet-4-20250514");
-    println!("  {bin} chat --model=openai/gpt-4o");
+    println!("  {bin} chat --tui --model=deepseek/deepseek-chat");
+    println!("  {bin} chat --prompt=\"explain this project\"");
     println!();
     println!("Environment variables:");
     println!("  DEEPSEEK_API_KEY   DeepSeek API key");

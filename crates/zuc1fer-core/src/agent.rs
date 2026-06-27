@@ -39,6 +39,11 @@ You have access to tools for reading, writing, searching, and executing code. Wh
 Current working directory: {working_dir}
 "#;
 
+pub struct TuiOutput {
+    pub text_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    pub debug_tx: tokio::sync::mpsc::UnboundedSender<String>,
+}
+
 pub struct Agent {
     config: Config,
     provider_registry: ProviderRegistry,
@@ -47,6 +52,7 @@ pub struct Agent {
     repomap: Option<RepoMap>,
     #[allow(dead_code)]
     mcp_bridges: Vec<Arc<McpBridge>>,
+    tui: Option<TuiOutput>,
 }
 
 impl Agent {
@@ -139,7 +145,45 @@ impl Agent {
             working_dir,
             repomap: Some(repomap),
             mcp_bridges,
+            tui: None,
         })
+    }
+
+    pub fn with_tui(mut self, text_tx: tokio::sync::mpsc::UnboundedSender<String>, debug_tx: tokio::sync::mpsc::UnboundedSender<String>) -> Self {
+        self.tui = Some(TuiOutput { text_tx, debug_tx });
+        self
+    }
+
+    fn emit(&self, text: &str) {
+        if let Some(ref tui) = self.tui {
+            let _ = tui.text_tx.send(text.to_string());
+        } else {
+            print!("{text}");
+        }
+    }
+
+    fn emitln(&self, text: &str) {
+        if let Some(ref tui) = self.tui {
+            let _ = tui.text_tx.send(format!("{text}\n"));
+        } else {
+            println!("{text}");
+        }
+    }
+
+    fn emit_debug(&self, text: &str) {
+        if let Some(ref tui) = self.tui {
+            let _ = tui.debug_tx.send(text.to_string());
+        } else {
+            eprint!("{text}");
+        }
+    }
+
+    fn emitln_debug(&self, text: &str) {
+        if let Some(ref tui) = self.tui {
+            let _ = tui.debug_tx.send(format!("{text}\n"));
+        } else {
+            eprintln!("{text}");
+        }
     }
 
     pub fn add_tool(&mut self, tool: Arc<dyn zuc1fer_tools::Tool>) {
@@ -257,7 +301,10 @@ impl Agent {
             for retry in 0..MAX_RETRIES {
                 if retry > 0 {
                     let delay = Duration::from_millis(BASE_BACKOFF_MS * 2u64.pow(retry - 1));
-                    eprintln!("\n(API hiccup, retrying in {}s... attempt {}/{})", delay.as_secs(), retry + 1, MAX_RETRIES);
+                    self.emit_debug(&format!(
+                        "\n(API hiccup, retrying in {}s... attempt {}/{})",
+                        delay.as_secs(), retry + 1, MAX_RETRIES
+                    ));
                     tokio::time::sleep(delay).await;
                     text_buf.clear();
                     tool_calls.clear();
@@ -276,7 +323,7 @@ impl Agent {
                 while let Some(event) = event_rx.recv().await {
                     match event {
                         StreamEvent::TextDelta { text } => {
-                            print!("{text}");
+                            self.emit(&text);
                             text_buf.push_str(&text);
                         }
                         StreamEvent::TextDone { .. } => {}
@@ -292,7 +339,7 @@ impl Agent {
                             });
                         }
                         StreamEvent::Error { message } => {
-                            eprintln!("\nError: {message}");
+                            self.emitln_debug(&format!("\nError: {message}"));
                             got_error = true;
                             break;
                         }
@@ -321,7 +368,7 @@ impl Agent {
                     }
                     Ok(Err(e)) => {
                         if retry == MAX_RETRIES - 1 {
-                            eprintln!("\nProvider error: {e}");
+                            self.emitln_debug(&format!("\nProvider error: {e}"));
                             return Ok(AgentResponse {
                                 text: text_buf,
                                 tool_calls,
@@ -330,7 +377,7 @@ impl Agent {
                         }
                     }
                     Err(e) => {
-                        eprintln!("\nInternal error: {e}");
+                        self.emitln_debug(&format!("\nInternal error: {e}"));
                         return Ok(AgentResponse {
                             text: String::new(),
                             tool_calls: Vec::new(),
@@ -341,7 +388,7 @@ impl Agent {
             }
 
             if !turn_ok {
-                eprintln!("\nFailed after {MAX_RETRIES} retries");
+                self.emitln_debug(&format!("\nFailed after {MAX_RETRIES} retries"));
                 return Ok(AgentResponse {
                     text: text_buf,
                     tool_calls,
@@ -350,7 +397,7 @@ impl Agent {
             }
 
             if !text_buf.is_empty() {
-                println!();
+                self.emitln("");
             }
 
             if tool_calls.is_empty() {
@@ -372,7 +419,7 @@ impl Agent {
                 working_dir: self.working_dir.clone(),
             };
 
-            eprintln!("Running {} tool(s)...\n", tool_calls.len());
+            self.emitln_debug(&format!("Running {} tool(s)...\n", tool_calls.len()));
 
             let results = self
                 .tool_registry
@@ -381,7 +428,10 @@ impl Agent {
 
             for result in &results {
                 if result.is_error {
-                    eprintln!("  [{}] Error: {}", result.tool_call_id, result.content);
+                    self.emitln_debug(&format!(
+                        "  [{}] Error: {}",
+                        result.tool_call_id, result.content
+                    ));
                 } else {
                     let preview: String = result
                         .content
@@ -390,14 +440,17 @@ impl Agent {
                         .collect::<Vec<_>>()
                         .join("\n");
                     if preview.len() < result.content.len() {
-                        eprintln!(
+                        self.emitln_debug(&format!(
                             "  [{}] {}\n  ... ({} more chars)",
                             result.tool_call_id,
                             preview,
                             result.content.len() - preview.len()
-                        );
+                        ));
                     } else if !preview.is_empty() {
-                        eprintln!("  [{}] {}", result.tool_call_id, preview);
+                        self.emitln_debug(&format!(
+                            "  [{}] {}",
+                            result.tool_call_id, preview
+                        ));
                     }
                 }
             }

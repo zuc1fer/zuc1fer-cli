@@ -12,11 +12,14 @@ path = "src/main.rs"
 zuc1fer-core = { path = "crates/zuc1fer-core" }
 zuc1fer-llm = { path = "crates/zuc1fer-llm" }
 zuc1fer-tools = { path = "crates/zuc1fer-tools" }
+zuc1fer-tui = { path = "crates/zuc1fer-tui" }
 tokio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
+ratatui = "0.29"
+crossterm = "0.28"
 
 [workspace]
 resolver = "2"
