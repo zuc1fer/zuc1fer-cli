@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::repomap::RepoMap;
 use crate::session::{Session, SessionMessage};
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,6 +42,7 @@ pub struct Agent {
     provider_registry: ProviderRegistry,
     tool_registry: ToolRegistry,
     working_dir: std::path::PathBuf,
+    repomap: Option<RepoMap>,
 }
 
 impl Agent {
@@ -101,11 +103,15 @@ impl Agent {
             }
         }
 
+        let mut repomap = RepoMap::new(working_dir.clone(), 1024);
+        let _ = repomap.build();
+
         Self {
             config,
             provider_registry,
             tool_registry,
             working_dir,
+            repomap: Some(repomap),
         }
     }
 
@@ -174,7 +180,7 @@ impl Agent {
             })
             .collect();
 
-        let system_prompt = self
+        let mut system_prompt = self
             .config
             .system_prompt
             .clone()
@@ -184,6 +190,11 @@ impl Agent {
                     &self.working_dir.display().to_string(),
                 )
             });
+
+        if let Some(ref repomap) = self.repomap {
+            system_prompt.push_str("\n\n---\n\n");
+            system_prompt.push_str(&repomap.format_context());
+        }
 
         let supports_caching = provider.supports_prompt_caching();
 
