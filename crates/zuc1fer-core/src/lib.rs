@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod config;
+pub mod repomap;
 pub mod session;
 
 use anyhow::Context;
