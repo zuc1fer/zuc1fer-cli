@@ -69,7 +69,7 @@ impl Default for Config {
         );
 
         Self {
-            model: "deepseek/deepseek-chat".into(),
+            model: "deepseek/deepseek-v4-pro".into(),
             providers,
             max_turns: 100,
             max_tokens_per_turn: 4096,
@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn test_default_config_model() {
         let config = Config::default();
-        assert_eq!(config.model, "deepseek/deepseek-chat");
+        assert_eq!(config.model, "deepseek/deepseek-v4-pro");
     }
 
     #[test]
