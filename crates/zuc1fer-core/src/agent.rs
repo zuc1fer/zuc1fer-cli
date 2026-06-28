@@ -298,6 +298,26 @@ impl Agent {
         }
     }
 
+    fn emit_sessions(&self) {
+        if let Some(ref store) = self.session_store {
+            if let Ok(sessions) = store.list() {
+                let json: Vec<serde_json::Value> = sessions.iter().map(|s| {
+                    serde_json::json!({
+                        "id": s.id,
+                        "model": s.model,
+                        "msgs": s.message_count,
+                        "tokens": s.total_tokens,
+                        "updated": s.updated_at,
+                    })
+                }).collect();
+                let msg = format!("__SESSIONS__:{}", serde_json::to_string(&json).unwrap_or_default());
+                if let Some(ref tui) = self.tui {
+                    let _ = tui.debug_tx.send(msg);
+                }
+            }
+        }
+    }
+
     pub fn list_models(&self) -> Vec<String> {
         self.provider_registry.list_models()
     }
@@ -447,6 +467,7 @@ impl Agent {
         self.emit_repomap();
         self.emit_mcp_status();
         self.emit_models();
+        self.emit_sessions();
 
         session.add_message(SessionMessage {
             role: "user".into(),

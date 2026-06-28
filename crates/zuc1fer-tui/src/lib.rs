@@ -36,6 +36,9 @@ pub struct App {
     pub show_model_picker: bool,
     pub model_picker_query: String,
     pub model_picker_selection: usize,
+    pub sessions: Vec<SessionInfo>,
+    pub show_session_picker: bool,
+    pub session_picker_selection: usize,
     last_assistant_idx: usize,
     scroll_offset: Cell<usize>,
     auto_scroll: Cell<bool>,
@@ -52,6 +55,15 @@ pub enum MessageRole {
     User,
     Assistant,
     System,
+}
+
+#[derive(Clone)]
+pub struct SessionInfo {
+    pub id: String,
+    pub model: String,
+    pub message_count: usize,
+    pub total_tokens: u64,
+    pub updated_at: String,
 }
 
 impl App {
@@ -88,6 +100,9 @@ impl App {
             show_model_picker: false,
             model_picker_query: String::new(),
             model_picker_selection: 0,
+            sessions: Vec::new(),
+            show_session_picker: false,
+            session_picker_selection: 0,
             last_assistant_idx: 0,
             scroll_offset: Cell::new(0),
             auto_scroll: Cell::new(true),
@@ -225,6 +240,31 @@ impl App {
                 KeyCode::Char(c) => {
                     self.model_picker_query.push(c);
                     self.model_picker_selection = 0;
+                }
+                _ => {}
+            }
+            return None;
+        }
+
+        if self.show_session_picker {
+            match key.code {
+                KeyCode::Esc => {
+                    self.show_session_picker = false;
+                    self.session_picker_selection = 0;
+                }
+                KeyCode::Enter => {
+                    let sel = self.session_picker_selection;
+                    self.show_session_picker = false;
+                    self.session_picker_selection = 0;
+                    if let Some(s) = self.sessions.get(sel) {
+                        return Some(format!("__SESSION_SELECT__:{}", s.id));
+                    }
+                }
+                KeyCode::Up => {
+                    self.session_picker_selection = self.session_picker_selection.saturating_sub(1);
+                }
+                KeyCode::Down => {
+                    self.session_picker_selection += 1;
                 }
                 _ => {}
             }
@@ -409,6 +449,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
     if app.show_model_picker {
         draw_model_picker(frame, app);
+    }
+    if app.show_session_picker {
+        draw_session_picker(frame, app);
     }
 }
 
@@ -607,6 +650,54 @@ fn filtered_models<'a>(models: &'a [String], query: &str) -> Vec<&'a String> {
         .iter()
         .filter(|m| m.to_lowercase().contains(&q))
         .collect()
+}
+
+fn draw_session_picker(frame: &mut Frame, app: &App) {
+    let area = centered_rect(70, 60, frame.area());
+    frame.render_widget(Clear, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    let count = app.sessions.len();
+    frame.render_widget(
+        Paragraph::new(" Use ↑↓ to navigate, Enter to select, Esc to close ")
+            .block(Block::bordered().title(format!(" Sessions ({count}) "))),
+        chunks[0],
+    );
+
+    if app.sessions.is_empty() {
+        let msg = Paragraph::new(" No saved sessions.\n\n Start a chat to auto-save.")
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(msg, chunks[1]);
+    } else {
+        let items: Vec<String> = app
+            .sessions
+            .iter()
+            .map(|s| {
+                format!(
+                    " {} | {}msgs | {}tk | {} | {}",
+                    s.model,
+                    s.message_count,
+                    s.total_tokens,
+                    &s.updated_at[..s.updated_at.len().min(16)],
+                    &s.id[..s.id.len().min(8)],
+                )
+            })
+            .collect();
+
+        let sel = app
+            .session_picker_selection
+            .min(items.len().saturating_sub(1));
+        let mut state = ListState::default().with_selected(Some(sel));
+        frame.render_stateful_widget(
+            List::new(items).highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan)),
+            chunks[1],
+            &mut state,
+        );
+    }
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
