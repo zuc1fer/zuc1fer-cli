@@ -227,6 +227,43 @@ impl Agent {
         self.tool_registry.register(tool);
     }
 
+    fn emit_repomap(&self) {
+        if let Some(ref repomap) = self.repomap {
+            let files: Vec<(&str, f64)> = repomap
+                .file_rankings
+                .iter()
+                .map(|(path, score)| {
+                    (
+                        path.strip_prefix(&self.working_dir)
+                            .unwrap_or(path)
+                            .display()
+                            .to_string()
+                            .replace('\\', "/")
+                            .as_str()
+                            .to_owned(),
+                        *score,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|(s, f)| {
+                    let leaked: &'static str = Box::leak(s.into_boxed_str());
+                    (leaked, f)
+                })
+                .collect();
+
+            let json = serde_json::json!({
+                "files": files.iter().map(|(path, score)| {
+                    serde_json::json!([path, score])
+                }).collect::<Vec<_>>()
+            });
+            let msg = format!("__REPO__:{}", serde_json::to_string(&json).unwrap_or_default());
+            if let Some(ref tui) = self.tui {
+                let _ = tui.debug_tx.send(msg);
+            }
+        }
+    }
+
     pub fn list_models(&self) -> Vec<String> {
         self.provider_registry.list_models()
     }
@@ -268,6 +305,8 @@ impl Agent {
                     "No config for provider '{provider_name}'"
                 )
             })?;
+
+        self.emit_repomap();
 
         session.add_message(SessionMessage {
             role: "user".into(),
