@@ -96,8 +96,8 @@ impl App {
         self.scroll = 0;
     }
 
-    fn scroll_step(&self) -> usize {
-        (self.view_height.get() / 2).max(1)
+    fn max_scroll(&self) -> usize {
+        self.messages.len().saturating_sub(5)
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
@@ -132,11 +132,17 @@ impl App {
             }
             KeyCode::Home => self.cursor = 0,
             KeyCode::End => self.cursor = self.input.len(),
-            KeyCode::PageUp | KeyCode::Up => {
-                self.scroll = self.scroll.saturating_add(self.scroll_step());
+            KeyCode::PageUp => {
+                self.scroll = (self.scroll + 10).min(self.max_scroll());
             }
-            KeyCode::PageDown | KeyCode::Down => {
-                self.scroll = self.scroll.saturating_sub(self.scroll_step());
+            KeyCode::PageDown => {
+                self.scroll = self.scroll.saturating_sub(10);
+            }
+            KeyCode::Up => {
+                self.scroll = (self.scroll + 1).min(self.max_scroll());
+            }
+            KeyCode::Down => {
+                self.scroll = self.scroll.saturating_sub(1);
             }
             _ => {}
         }
