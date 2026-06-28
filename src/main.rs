@@ -208,6 +208,19 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                         }
                     }
                 }
+            } else if let Some(rest) = dbg.strip_prefix("__SESSIONS__:") {
+                if let Ok(data) = serde_json::from_str::<Vec<serde_json::Value>>(rest) {
+                    app.sessions.clear();
+                    for s in data {
+                        app.sessions.push(zuc1fer_tui::SessionInfo {
+                            id: s["id"].as_str().unwrap_or("").into(),
+                            model: s["model"].as_str().unwrap_or("").into(),
+                            message_count: s["msgs"].as_u64().unwrap_or(0) as usize,
+                            total_tokens: s["tokens"].as_u64().unwrap_or(0),
+                            updated_at: s["updated"].as_str().unwrap_or("").into(),
+                        });
+                    }
+                }
             } else if dbg.contains("Running") || dbg.contains("Error") || dbg.contains("retrying") {
                 app.add_system_message(dbg);
             }
@@ -233,10 +246,12 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                         continue;
                     }
                     if key.code == crossterm::event::KeyCode::Enter && !app.streaming {
-                        if app.palette_open || app.show_model_picker {
+                        if app.palette_open || app.show_model_picker || app.show_session_picker {
                             if let Some(cmd) = app.handle_key(key) {
                                 if let Some(model) = cmd.strip_prefix("__MODEL_SELECT__:") {
                                     app.add_system_message(format!("Model selected: {model}. Restart with --model={model} to apply."));
+                                } else if let Some(sid) = cmd.strip_prefix("__SESSION_SELECT__:") {
+                                    app.add_system_message(format!("Session selected: {sid}. Use 'zuc1fer session resume {sid}' to resume."));
                                 } else {
                                     handle_palette_command(&mut app, &cmd);
                                 }
@@ -547,7 +562,8 @@ fn handle_palette_command(app: &mut zuc1fer_tui::App, cmd: &str) {
             app.add_system_message(format!("Config directory: {}", dir.display()));
         }
         "/session" => {
-            app.add_system_message("Session management: use 'zuc1fer session list' to see saved sessions.".into());
+            app.show_session_picker = true;
+            app.session_picker_selection = 0;
         }
         _ => {
             app.add_system_message(format!("Unknown command: {cmd}"));
