@@ -1,10 +1,12 @@
 pub mod agent;
+pub mod code_index;
 pub mod config;
 pub mod mcp_bridge;
 pub mod mcp_tool;
 pub mod repomap;
 pub mod session;
 pub mod session_store;
+pub mod ts_parser;
 
 use anyhow::Context;
 use std::path::PathBuf;

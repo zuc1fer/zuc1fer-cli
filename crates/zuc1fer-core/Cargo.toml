@@ -23,3 +23,10 @@ zuc1fer-tools = { path = "../zuc1fer-tools" }
 zuc1fer-llm = { path = "../zuc1fer-llm" }
 zuc1fer-mcp = { path = "../zuc1fer-mcp" }
 rusqlite = { version = "0.32", features = ["bundled"] }
+tree-sitter = "0.25"
+tree-sitter-rust = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-go = "0.23"
+tantivy = "0.22"
