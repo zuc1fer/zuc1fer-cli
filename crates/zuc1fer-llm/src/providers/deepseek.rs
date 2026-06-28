@@ -48,6 +48,9 @@ impl DeepSeekProvider {
         if let Some(p) = request.top_p {
             body["top_p"] = p.into();
         }
+        if let Some(ref effort) = request.reasoning_effort {
+            body["reasoning_effort"] = effort.as_str().into();
+        }
 
         body
     }
@@ -223,6 +226,13 @@ impl LlmProvider for DeepSeekProvider {
                                         text_buf.push_str(content);
                                         let _ = event_tx.send(StreamEvent::TextDelta {
                                             text: content.to_string(),
+                                        });
+                                    }
+                                }
+                                if let Some(reasoning) = delta["reasoning_content"].as_str() {
+                                    if !reasoning.is_empty() {
+                                        let _ = event_tx.send(StreamEvent::ReasoningDelta {
+                                            text: reasoning.to_string(),
                                         });
                                     }
                                 }
