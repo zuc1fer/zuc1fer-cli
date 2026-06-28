@@ -59,6 +59,7 @@ pub struct Agent {
     repomap: Option<RepoMap>,
     #[allow(dead_code)]
     code_index: Option<Arc<CodeIndex>>,
+    mcp_status: Vec<(String, bool)>,
     #[allow(dead_code)]
     mcp_bridges: Vec<Arc<McpBridge>>,
     tui: Option<TuiOutput>,
@@ -127,8 +128,10 @@ impl Agent {
         let _ = repomap.build();
 
         let mut mcp_bridges = Vec::new();
+        let mut mcp_status: Vec<(String, bool)> = Vec::new();
         for server in &config.mcp {
             if !server.enabled {
+                mcp_status.push((server.command.clone(), false));
                 continue;
             }
             match McpBridge::connect(&server.command, &server.args).await {
@@ -141,9 +144,11 @@ impl Agent {
                         tool_registry.register(Arc::new(mcp_tool));
                     }
                     mcp_bridges.push(bridge);
+                    mcp_status.push((server.command.clone(), true));
                 }
                 Err(e) => {
                     tracing::warn!("MCP server '{}' failed to connect: {e}", server.command);
+                    mcp_status.push((server.command.clone(), false));
                 }
             }
         }
@@ -182,6 +187,7 @@ impl Agent {
             working_dir,
             repomap: Some(repomap),
             code_index,
+            mcp_status,
             mcp_bridges,
             tui: None,
             session_store: None,
@@ -268,6 +274,18 @@ impl Agent {
             if let Some(ref tui) = self.tui {
                 let _ = tui.debug_tx.send(msg);
             }
+        }
+    }
+
+    fn emit_mcp_status(&self) {
+        let json = serde_json::json!({
+            "servers": self.mcp_status.iter().map(|(name, connected)| {
+                serde_json::json!([name, connected])
+            }).collect::<Vec<_>>()
+        });
+        let msg = format!("__MCP__:{}", serde_json::to_string(&json).unwrap_or_default());
+        if let Some(ref tui) = self.tui {
+            let _ = tui.debug_tx.send(msg);
         }
     }
 
@@ -418,6 +436,7 @@ impl Agent {
 
         self.maybe_compact(session, &provider, &model_name).await;
         self.emit_repomap();
+        self.emit_mcp_status();
 
         session.add_message(SessionMessage {
             role: "user".into(),

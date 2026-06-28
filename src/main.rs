@@ -153,6 +153,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                     if parts.len() == 2 {
                         app.tokens_in += parts[0].parse::<u64>().unwrap_or(0);
                         app.tokens_out += parts[1].parse::<u64>().unwrap_or(0);
+                        app.update_cost();
                     }
                 }
             } else if text.starts_with("__ERROR__:") {
@@ -176,6 +177,21 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                                     let path = arr[0].as_str().unwrap_or("").to_string();
                                     let score = arr[1].as_f64().unwrap_or(0.0);
                                     app.repo_files.push((path, score));
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if let Some(rest) = dbg.strip_prefix("__MCP__:") {
+                if let Ok(data) = serde_json::from_str::<serde_json::Value>(rest) {
+                    app.mcp_servers.clear();
+                    if let Some(servers) = data["servers"].as_array() {
+                        for entry in servers {
+                            if let Some(arr) = entry.as_array() {
+                                if arr.len() == 2 {
+                                    let name = arr[0].as_str().unwrap_or("").to_string();
+                                    let connected = arr[1].as_bool().unwrap_or(false);
+                                    app.mcp_servers.push((name, connected));
                                 }
                             }
                         }
