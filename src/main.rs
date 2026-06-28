@@ -222,6 +222,12 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                         continue;
                     }
                     if key.code == crossterm::event::KeyCode::Enter && !app.streaming {
+                        if app.palette_open {
+                            if let Some(cmd) = app.handle_key(key) {
+                                handle_palette_command(&mut app, &cmd);
+                            }
+                            continue;
+                        }
                         let prompt = app.take_input();
                         if prompt.is_empty() {
                             continue;
@@ -230,7 +236,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                         app.status = "Thinking...".into();
                         let _ = prompt_tx.send(prompt);
                     } else {
-                        app.handle_key(key);
+                        let _ = app.handle_key(key);
                     }
                 }
                 crossterm::event::Event::Mouse(mouse) => {
@@ -489,6 +495,25 @@ fn show_config() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn handle_palette_command(app: &mut zuc1fer_tui::App, cmd: &str) {
+    match cmd {
+        "/quit" | "/q" => app.running = false,
+        "/clear" => {
+            app.messages.clear();
+            app.tokens_in = 0;
+            app.tokens_out = 0;
+            app.cost_usd = 0.0;
+            app.add_system_message("Session cleared.".into());
+        }
+        "/toggle-sidebar" => {
+            app.show_repo_panel = !app.show_repo_panel;
+        }
+        _ => {
+            app.add_system_message(format!("Command: {cmd}"));
+        }
+    }
 }
 
 fn print_usage(bin: &str) {
