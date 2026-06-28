@@ -88,6 +88,8 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     for arg in args.iter().skip(2) {
         if let Some(model) = arg.strip_prefix("--model=") {
             config.model = model.to_string();
+        } else if arg == "--safe" {
+            config.safe_mode = true;
         }
     }
 

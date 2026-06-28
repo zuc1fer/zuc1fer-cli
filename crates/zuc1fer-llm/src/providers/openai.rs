@@ -21,12 +21,17 @@ impl OpenAIProvider {
     }
 
     fn convert_request(&self, request: &ChatRequest) -> Value {
-        let messages: Vec<Value> = std::iter::once(serde_json::json!({
+        let mut system_msg = serde_json::json!({
             "role": "system",
             "content": request.system,
-        }))
-        .chain(request.messages.iter().map(|m| self.convert_message(m)))
-        .collect();
+        });
+        if request.cache_system {
+            system_msg["cache_control"] = serde_json::json!({"type": "ephemeral"});
+        }
+
+        let messages: Vec<Value> = std::iter::once(system_msg)
+            .chain(request.messages.iter().map(|m| self.convert_message(m)))
+            .collect();
 
         let tools: Vec<Value> = request
             .tools

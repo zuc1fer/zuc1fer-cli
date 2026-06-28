@@ -2505,7 +2505,6 @@ dependencies = [
  "uuid",
  "zuc1fer-llm",
  "zuc1fer-mcp",
- "zuc1fer-search",
  "zuc1fer-tools",
 ]
 
@@ -2534,20 +2533,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "futures",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "zuc1fer-search"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "regex",
  "serde",
  "serde_json",
  "thiserror",

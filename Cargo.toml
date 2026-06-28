@@ -27,7 +27,6 @@ members = [
     "crates/zuc1fer-core",
     "crates/zuc1fer-tools",
     "crates/zuc1fer-llm",
-    "crates/zuc1fer-search",
     "crates/zuc1fer-tui",
     "crates/zuc1fer-mcp",
 ]

@@ -21,6 +21,5 @@ toml.workspace = true
 
 zuc1fer-tools = { path = "../zuc1fer-tools" }
 zuc1fer-llm = { path = "../zuc1fer-llm" }
-zuc1fer-search = { path = "../zuc1fer-search" }
 zuc1fer-mcp = { path = "../zuc1fer-mcp" }
 rusqlite = { version = "0.32", features = ["bundled"] }
