@@ -1,7 +1,10 @@
+use crate::code_index::CodeIndex;
 use crate::config::Config;
+use crate::indexer::Indexer;
 use crate::mcp_bridge::McpBridge;
 use crate::mcp_tool::McpTool;
 use crate::repomap::RepoMap;
+use crate::semantic_tool::SemanticTool;
 use crate::session::{Session, SessionMessage};
 use crate::session_store::SessionStore;
 use std::sync::Arc;
@@ -52,6 +55,8 @@ pub struct Agent {
     tool_registry: ToolRegistry,
     working_dir: std::path::PathBuf,
     repomap: Option<RepoMap>,
+    #[allow(dead_code)]
+    code_index: Option<Arc<CodeIndex>>,
     #[allow(dead_code)]
     mcp_bridges: Vec<Arc<McpBridge>>,
     tui: Option<TuiOutput>,
@@ -141,12 +146,33 @@ impl Agent {
             }
         }
 
+        let code_index = {
+            let index_dir = crate::default_data_dir()
+                .unwrap_or_else(|_| working_dir.join(".zuc1fer").join("index"))
+                .join("code_index");
+            let ci = Arc::new(CodeIndex::open_or_create(&index_dir)?);
+
+            if ci.file_count() == 0 {
+                tracing::info!("Building Tantivy code index...");
+                Indexer::build_full_index(&ci, &working_dir)?;
+            } else {
+                tracing::info!("Tantivy index loaded: {} files", ci.file_count());
+            }
+
+            let indexer = Indexer::new(ci.clone(), working_dir.clone());
+            indexer.start();
+
+            tool_registry.register(Arc::new(SemanticTool::new(ci.clone())));
+            Some(ci)
+        };
+
         Ok(Self {
             config,
             provider_registry,
             tool_registry,
             working_dir,
             repomap: Some(repomap),
+            code_index,
             mcp_bridges,
             tui: None,
             session_store: None,
