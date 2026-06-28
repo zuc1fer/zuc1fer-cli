@@ -38,11 +38,19 @@ impl Tool for EditTool {
         let path_str = call.arguments["filePath"].as_str().unwrap_or("");
         let path = PathBuf::from(path_str);
 
-        let path = if path.is_relative() {
+        let mut path = if path.is_relative() {
             ctx.working_dir.join(path)
         } else {
             path
         };
+
+        if !path.exists() {
+            if let Some(alt) = crate::try_fuzzy_path(path_str) {
+                if alt.exists() {
+                    path = alt;
+                }
+            }
+        }
 
         let old = call.arguments["oldString"].as_str().unwrap_or("");
         let new = call.arguments["newString"].as_str().unwrap_or("");

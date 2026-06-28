@@ -81,6 +81,21 @@ pub trait Tool: Send + Sync {
     ) -> anyhow::Result<ToolResult>;
 }
 
+pub fn try_fuzzy_path(path_str: &str) -> Option<std::path::PathBuf> {
+    let p = std::path::PathBuf::from(path_str);
+    if p.is_absolute() {
+        let swapped = std::path::PathBuf::from(path_str.replace('\\', "/"));
+        if swapped != p && swapped.exists() {
+            return Some(swapped);
+        }
+        let swapped_back = std::path::PathBuf::from(path_str.replace('/', "\\"));
+        if swapped_back != p && swapped_back.exists() {
+            return Some(swapped_back);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

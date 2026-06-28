@@ -53,11 +53,20 @@ impl Tool for GlobTool {
 
     async fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> anyhow::Result<ToolResult> {
         let pattern = call.arguments["pattern"].as_str().unwrap_or("*");
-        let search_dir = call
-            .arguments["path"]
-            .as_str()
+        let search_dir_path = call.arguments["path"].as_str();
+        let mut search_dir = search_dir_path
             .map(PathBuf::from)
             .unwrap_or_else(|| ctx.working_dir.clone());
+
+        if !search_dir.exists() {
+            if let Some(path_str) = search_dir_path {
+                if let Some(alt) = crate::try_fuzzy_path(path_str) {
+                    if alt.exists() {
+                        search_dir = alt;
+                    }
+                }
+            }
+        }
 
         match self.run_rg_glob(&search_dir, pattern).await {
             Ok(files) => {
