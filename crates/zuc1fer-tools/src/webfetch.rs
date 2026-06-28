@@ -84,6 +84,11 @@ impl Tool for WebFetch {
                     } else {
                         rendered
                     }
+                } else if content_type.contains("image/") || content_type.contains("video/")
+                    || content_type.contains("audio/") || content_type.contains("application/pdf")
+                    || content_type.contains("application/octet-stream")
+                {
+                    format!("[Binary content: {}]", content_type)
                 } else {
                     if body.len() > 20_000 {
                         format!("{}\n\n[truncated: {} total chars]", &body[..20_000], body.len())
