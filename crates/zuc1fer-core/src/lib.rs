@@ -2,6 +2,8 @@ pub mod agent;
 pub mod code_index;
 pub mod config;
 pub mod indexer;
+pub mod lsp_client;
+pub mod lsp_tool;
 pub mod mcp_bridge;
 pub mod mcp_tool;
 pub mod repomap;
