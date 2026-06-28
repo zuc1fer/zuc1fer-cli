@@ -1,6 +1,7 @@
 use crate::code_index::CodeIndex;
 use crate::config::Config;
 use crate::indexer::Indexer;
+use crate::lsp_tool::LspTool;
 use crate::mcp_bridge::McpBridge;
 use crate::mcp_tool::McpTool;
 use crate::repomap::RepoMap;
@@ -163,6 +164,7 @@ impl Agent {
             indexer.start();
 
             tool_registry.register(Arc::new(SemanticTool::new(ci.clone())));
+            tool_registry.register(Arc::new(LspTool::new(working_dir.clone())));
             Some(ci)
         };
 
