@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
         Block, Borders, Clear, Gauge, List, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
@@ -817,14 +817,36 @@ fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> Vec<Line<'
                 }
             }
             MessageRole::Assistant => {
-                for w in wrap_text(&msg.text, width) {
-                    if w.is_empty() {
-                        lines.push(Line::from(""));
-                    } else {
+                let mut in_code_block = false;
+                for text_line in msg.text.lines() {
+                    if text_line.trim().starts_with("```") {
+                        in_code_block = !in_code_block;
                         lines.push(Line::from(vec![Span::styled(
-                            w,
-                            Style::default().fg(Color::Gray),
+                            text_line.to_string(),
+                            Style::default().fg(Color::DarkGray),
                         )]));
+                        continue;
+                    }
+                    if in_code_block {
+                        let wrapped = wrap_text(text_line, width.saturating_sub(2));
+                        for w in wrapped {
+                            lines.push(Line::from(vec![Span::styled(
+                                format!("  {w}"),
+                                Style::default().fg(Color::DarkGray),
+                            )]));
+                        }
+                        continue;
+                    }
+                    let rendered = render_markdown_line(text_line);
+                    let rendered_str = spans_to_string(&rendered);
+                    let wrapped = wrap_text(&rendered_str, width);
+                    for w in wrapped {
+                        if w.is_empty() {
+                            lines.push(Line::from(""));
+                        } else {
+                            let styled = style_line_from_markdown(&w);
+                            lines.push(styled);
+                        }
                     }
                 }
             }
@@ -839,6 +861,126 @@ fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> Vec<Line<'
         }
     }
     lines
+}
+
+fn render_markdown_line(line: &str) -> Vec<Span<'static>> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return vec![Span::raw("")];
+    }
+    if trimmed.starts_with("### ") {
+        return vec![Span::styled(
+            trimmed.strip_prefix("### ").unwrap_or(trimmed).to_string(),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )];
+    }
+    if trimmed.starts_with("## ") {
+        return vec![Span::styled(
+            trimmed.strip_prefix("## ").unwrap_or(trimmed).to_string(),
+            Style::default().fg(Color::Cyan),
+        )];
+    }
+    if trimmed.starts_with("# ") {
+        return vec![Span::styled(
+            trimmed.strip_prefix("# ").unwrap_or(trimmed).to_string(),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )];
+    }
+    if trimmed.starts_with("> ") {
+        let content = trimmed.strip_prefix("> ").unwrap_or(trimmed);
+        return vec![Span::styled(
+            format!("│ {content}"),
+            Style::default().fg(Color::DarkGray),
+        )];
+    }
+    if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+        let content = &trimmed[2..];
+        return vec![Span::styled(
+            format!("  • {content}"),
+            Style::default().fg(Color::Gray),
+        )];
+    }
+    if let Some(cap) = numbered_prefix(trimmed) {
+        return vec![Span::styled(cap, Style::default().fg(Color::Gray))];
+    }
+    if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+        let bar = "─".repeat(40);
+        return vec![Span::styled(bar, Style::default().fg(Color::DarkGray))];
+    }
+    render_inline_markdown(line)
+}
+
+fn numbered_prefix(s: &str) -> Option<String> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i > 0 && i < bytes.len() && bytes[i] == b'.' && i + 1 < bytes.len() && bytes[i + 1] == b' ' {
+        Some(format!("  {}. {}", &s[..i], s[i + 2..].trim()))
+    } else {
+        None
+    }
+}
+
+fn render_inline_markdown(line: &str) -> Vec<Span<'static>> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut remaining = line;
+    let base = Style::default().fg(Color::Gray);
+
+    while !remaining.is_empty() {
+        if let Some(start) = remaining.find("**") {
+            if start > 0 {
+                spans.push(Span::styled(remaining[..start].to_string(), base));
+            }
+            remaining = &remaining[start + 2..];
+            if let Some(end) = remaining.find("**") {
+                spans.push(Span::styled(
+                    remaining[..end].to_string(),
+                    base.add_modifier(Modifier::BOLD),
+                ));
+                remaining = &remaining[end + 2..];
+            } else {
+                spans.push(Span::styled(format!("**{remaining}"), base));
+                remaining = "";
+            }
+        } else if let Some(start) = remaining.find('`') {
+            if start > 0 {
+                spans.push(Span::styled(remaining[..start].to_string(), base));
+            }
+            remaining = &remaining[start + 1..];
+            if let Some(end) = remaining.find('`') {
+                spans.push(Span::styled(
+                    remaining[..end].to_string(),
+                    Style::default().fg(Color::Yellow).bg(Color::DarkGray),
+                ));
+                remaining = &remaining[end + 1..];
+            } else {
+                spans.push(Span::styled(format!("`{remaining}"), base));
+                remaining = "";
+            }
+        } else {
+            spans.push(Span::styled(remaining.to_string(), base));
+            break;
+        }
+    }
+    spans
+}
+
+fn spans_to_string(spans: &[Span]) -> String {
+    spans
+        .iter()
+        .map(|s| s.content.clone())
+        .collect::<Vec<_>>()
+        .concat()
+}
+
+fn style_line_from_markdown(line: &str) -> Line<'static> {
+    Line::from(render_inline_markdown(line))
 }
 
 fn wrap_text(text: &str, width: usize) -> Vec<String> {
