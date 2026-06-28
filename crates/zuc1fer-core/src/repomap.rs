@@ -392,7 +392,8 @@ impl RepoMap {
                 .strip_prefix(&self.working_dir)
                 .unwrap_or(&sym.file)
                 .display()
-                .to_string();
+                .to_string()
+                .replace('\\', "/");
 
             let entry = format!(
                 "\n{rel_path} (relevance: {:.3})\n  {} {}: {}\n",

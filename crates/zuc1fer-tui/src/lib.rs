@@ -17,11 +17,13 @@ pub struct App {
     pub model: String,
     pub tokens_in: u64,
     pub tokens_out: u64,
-    pub scroll: usize,
     pub running: bool,
     pub streaming: bool,
-    pub view_height: Cell<usize>,
     last_assistant_idx: usize,
+    scroll_offset: Cell<usize>,
+    auto_scroll: Cell<bool>,
+    total_lines: Cell<usize>,
+    view_height: Cell<usize>,
 }
 
 pub struct Message {
@@ -45,11 +47,13 @@ impl App {
             model: model.to_string(),
             tokens_in: 0,
             tokens_out: 0,
-            scroll: 0,
             running: true,
             streaming: false,
-            view_height: Cell::new(24),
             last_assistant_idx: 0,
+            scroll_offset: Cell::new(0),
+            auto_scroll: Cell::new(true),
+            total_lines: Cell::new(0),
+            view_height: Cell::new(24),
         }
     }
 
@@ -82,7 +86,7 @@ impl App {
         });
         self.last_assistant_idx = idx;
         self.streaming = true;
-        self.scroll = 0;
+        self.auto_scroll.set(true);
     }
 
     pub fn append_stream(&mut self, text: &str) {
@@ -93,11 +97,21 @@ impl App {
 
     pub fn end_streaming(&mut self) {
         self.streaming = false;
-        self.scroll = 0;
+    }
+
+    pub fn next_turn(&mut self) {
+        let idx = self.messages.len();
+        self.messages.push_back(Message {
+            role: MessageRole::Assistant,
+            text: String::new(),
+        });
+        self.last_assistant_idx = idx;
     }
 
     fn max_scroll(&self) -> usize {
-        self.messages.len().saturating_sub(5)
+        self.total_lines
+            .get()
+            .saturating_sub(self.view_height.get())
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
@@ -133,16 +147,32 @@ impl App {
             KeyCode::Home => self.cursor = 0,
             KeyCode::End => self.cursor = self.input.len(),
             KeyCode::PageUp => {
-                self.scroll = (self.scroll + 10).min(self.max_scroll());
+                let page = self.view_height.get().saturating_sub(2);
+                self.scroll_offset
+                    .set(self.scroll_offset.get().saturating_sub(page));
+                self.auto_scroll.set(false);
             }
             KeyCode::PageDown => {
-                self.scroll = self.scroll.saturating_sub(10);
+                let page = self.view_height.get().saturating_sub(2);
+                let max = self.max_scroll();
+                let new = (self.scroll_offset.get() + page).min(max);
+                self.scroll_offset.set(new);
+                if new >= max {
+                    self.auto_scroll.set(true);
+                }
             }
             KeyCode::Up => {
-                self.scroll = (self.scroll + 1).min(self.max_scroll());
+                self.scroll_offset
+                    .set(self.scroll_offset.get().saturating_sub(1));
+                self.auto_scroll.set(false);
             }
             KeyCode::Down => {
-                self.scroll = self.scroll.saturating_sub(1);
+                let max = self.max_scroll();
+                let new = (self.scroll_offset.get() + 1).min(max);
+                self.scroll_offset.set(new);
+                if new >= max {
+                    self.auto_scroll.set(true);
+                }
             }
             _ => {}
         }
@@ -161,16 +191,23 @@ pub fn draw(frame: &mut Frame, app: &App) {
         ])
         .split(area);
 
-    app.view_height.set(chunks[1].height as usize);
+    let msg_area = chunks[1];
+    app.view_height.set(msg_area.height as usize);
 
     draw_header(frame, chunks[0], app);
-    draw_messages(frame, chunks[1], app);
+    draw_messages(frame, msg_area, app);
     draw_input(frame, chunks[2], app);
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
-    let scrolled = if app.scroll > 0 {
-        format!(" [^{}]", app.scroll)
+    let scrolled = if !app.auto_scroll.get() {
+        let offset = app.scroll_offset.get();
+        let total = app.total_lines.get();
+        offset
+            .checked_mul(100)
+            .and_then(|v| v.checked_div(total))
+            .map(|v| format!(" [{}%]", v.min(99)))
+            .unwrap_or_default()
     } else {
         String::new()
     };
@@ -185,52 +222,114 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
-    let mut lines: Vec<Line> = Vec::new();
+    let width = area.width as usize;
+    let max_lines = area.height as usize;
 
-    let max_lines = area.height.saturating_sub(2) as usize;
+    let all_lines = build_message_lines(&app.messages, width);
+    let total = all_lines.len();
+    app.total_lines.set(total);
 
-    for msg in app
-        .messages
-        .iter()
-        .rev()
-        .skip(app.scroll)
+    let effective_scroll = if app.auto_scroll.get() {
+        let new_scroll = total.saturating_sub(max_lines);
+        app.scroll_offset.set(new_scroll);
+        new_scroll
+    } else {
+        let clamped = app.scroll_offset.get().min(total.saturating_sub(max_lines));
+        app.scroll_offset.set(clamped);
+        clamped
+    };
+
+    let visible: Vec<Line> = all_lines
+        .into_iter()
+        .skip(effective_scroll)
         .take(max_lines)
-        .rev()
-    {
+        .collect();
+
+    let mut lines = visible;
+    while lines.len() < max_lines {
+        lines.push(Line::from(""));
+    }
+
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    for msg in messages {
         match msg.role {
             MessageRole::User => {
-                lines.push(Line::from(vec![
-                    Span::styled("> ", Style::default().fg(Color::Cyan)),
-                    Span::styled(&msg.text, Style::default().fg(Color::White)),
-                ]));
+                let wrapped = wrap_text(&msg.text, width.saturating_sub(2));
+                for (i, w) in wrapped.iter().enumerate() {
+                    if i == 0 {
+                        lines.push(Line::from(vec![
+                            Span::styled("> ", Style::default().fg(Color::Cyan)),
+                            Span::styled(w.clone(), Style::default().fg(Color::White)),
+                        ]));
+                    } else {
+                        lines.push(Line::from(vec![Span::styled(
+                            format!("  {w}"),
+                            Style::default().fg(Color::White),
+                        )]));
+                    }
+                }
             }
             MessageRole::Assistant => {
-                for text_line in msg.text.lines() {
-                    lines.push(Line::from(vec![Span::styled(
-                        text_line,
-                        Style::default().fg(Color::Gray),
-                    )]));
+                for w in wrap_text(&msg.text, width) {
+                    if w.is_empty() {
+                        lines.push(Line::from(""));
+                    } else {
+                        lines.push(Line::from(vec![Span::styled(
+                            w,
+                            Style::default().fg(Color::Gray),
+                        )]));
+                    }
                 }
             }
             MessageRole::System => {
-                for text_line in msg.text.lines() {
+                for w in wrap_text(&format!("  {}", msg.text), width) {
                     lines.push(Line::from(vec![Span::styled(
-                        format!("  {text_line}"),
+                        w,
                         Style::default().fg(Color::DarkGray),
                     )]));
                 }
             }
         }
     }
+    lines
+}
 
-    if lines.len() < max_lines {
-        let blank = max_lines - lines.len();
-        for _ in 0..blank {
-            lines.push(Line::from(""));
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    if width <= 2 {
+        return text.lines().map(|s| s.to_string()).collect();
+    }
+    let mut result = Vec::new();
+    for line in text.lines() {
+        if line.is_empty() {
+            result.push(String::new());
+        } else {
+            wrap_line(line, width, &mut result);
         }
     }
+    result
+}
 
-    frame.render_widget(Paragraph::new(lines), area);
+fn wrap_line(line: &str, width: usize, result: &mut Vec<String>) {
+    let mut remaining = line;
+    while !remaining.is_empty() {
+        if remaining.len() <= width {
+            result.push(remaining.to_string());
+            break;
+        }
+        let boundary = width.min(remaining.len());
+        let mut split_at = boundary;
+        if let Some(space_idx) = remaining[..boundary].rfind(' ') {
+            if space_idx > 0 {
+                split_at = space_idx;
+            }
+        }
+        result.push(remaining[..split_at].to_string());
+        remaining = remaining[split_at..].trim_start();
+    }
 }
 
 fn draw_input(frame: &mut Frame, area: Rect, app: &App) {

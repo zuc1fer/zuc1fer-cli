@@ -43,6 +43,7 @@ Current working directory: {working_dir}
 pub struct TuiOutput {
     pub text_tx: tokio::sync::mpsc::UnboundedSender<String>,
     pub debug_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    pub turn_tx: tokio::sync::mpsc::UnboundedSender<()>,
 }
 
 pub struct Agent {
@@ -152,8 +153,8 @@ impl Agent {
         })
     }
 
-    pub fn with_tui(mut self, text_tx: tokio::sync::mpsc::UnboundedSender<String>, debug_tx: tokio::sync::mpsc::UnboundedSender<String>) -> Self {
-        self.tui = Some(TuiOutput { text_tx, debug_tx });
+    pub fn with_tui(mut self, text_tx: tokio::sync::mpsc::UnboundedSender<String>, debug_tx: tokio::sync::mpsc::UnboundedSender<String>, turn_tx: tokio::sync::mpsc::UnboundedSender<()>) -> Self {
+        self.tui = Some(TuiOutput { text_tx, debug_tx, turn_tx });
         self
     }
 
@@ -266,7 +267,7 @@ impl Agent {
             .unwrap_or_else(|| {
                 SYSTEM_PROMPT.replace(
                     "{working_dir}",
-                    &self.working_dir.display().to_string(),
+                    &self.working_dir.display().to_string().replace('\\', "/"),
                 )
             });
 
@@ -503,6 +504,10 @@ impl Agent {
 
             session.total_tokens = accumulated_usage.total_tokens;
             self.save_session(session);
+
+            if let Some(ref tui) = self.tui {
+                let _ = tui.turn_tx.send(());
+            }
         }
     }
 

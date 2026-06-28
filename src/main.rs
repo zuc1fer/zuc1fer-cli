@@ -98,9 +98,10 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     let (debug_tx, mut debug_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let (prompt_tx, mut prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let (done_tx, mut done_rx) = tokio::sync::mpsc::unbounded_channel::<bool>();
+    let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
 
     let agent = rt.block_on(Agent::new(config, working_dir.clone()))?
-        .with_tui(text_tx.clone(), debug_tx.clone())
+        .with_tui(text_tx.clone(), debug_tx.clone(), turn_tx.clone())
         .with_session_store(Arc::new(open_store()?));
     let agent = Arc::new(agent);
     let session = Arc::new(tokio::sync::Mutex::new(Session::new(
@@ -147,8 +148,8 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                 if let Some(rest) = text.strip_prefix("__TOKENS__:") {
                     let parts: Vec<&str> = rest.split(':').collect();
                     if parts.len() == 2 {
-                        app.tokens_in = parts[0].parse().unwrap_or(0);
-                        app.tokens_out = parts[1].parse().unwrap_or(0);
+                        app.tokens_in += parts[0].parse::<u64>().unwrap_or(0);
+                        app.tokens_out += parts[1].parse::<u64>().unwrap_or(0);
                     }
                 }
             } else if text.starts_with("__ERROR__:") {
@@ -165,6 +166,9 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
             if dbg.contains("Running") || dbg.contains("Error") || dbg.contains("retrying") {
                 app.add_system_message(dbg);
             }
+        }
+        while turn_rx.try_recv().is_ok() {
+            app.next_turn();
         }
         while let Ok(_) = done_rx.try_recv() {
             app.end_streaming();
