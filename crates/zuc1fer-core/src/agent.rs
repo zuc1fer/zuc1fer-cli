@@ -289,6 +289,15 @@ impl Agent {
         }
     }
 
+    fn emit_models(&self) {
+        let models = self.provider_registry.list_models();
+        let json = serde_json::json!({ "models": models });
+        let msg = format!("__MODELS__:{}", serde_json::to_string(&json).unwrap_or_default());
+        if let Some(ref tui) = self.tui {
+            let _ = tui.debug_tx.send(msg);
+        }
+    }
+
     pub fn list_models(&self) -> Vec<String> {
         self.provider_registry.list_models()
     }
@@ -437,6 +446,7 @@ impl Agent {
         self.maybe_compact(session, &provider, &model_name).await;
         self.emit_repomap();
         self.emit_mcp_status();
+        self.emit_models();
 
         session.add_message(SessionMessage {
             role: "user".into(),
