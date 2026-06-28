@@ -112,11 +112,13 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub cache_system: bool,
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
     TextDelta { text: String },
+    ReasoningDelta { text: String },
     TextDone { text: String },
     ToolUseStart { id: String, name: String },
     ToolUseDelta { id: String, input_json: String },

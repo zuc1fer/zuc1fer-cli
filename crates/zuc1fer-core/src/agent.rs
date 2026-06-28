@@ -379,6 +379,7 @@ impl Agent {
             temperature: Some(0.0),
             top_p: None,
             cache_system: false,
+            reasoning_effort: None,
         };
 
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -529,6 +530,11 @@ impl Agent {
                 temperature: self.config.temperature,
                 top_p: None,
                 cache_system: supports_caching,
+                reasoning_effort: if model_name.contains("reasoner") || model_name.contains("r1") {
+                    Some("medium".into())
+                } else {
+                    None
+                },
             };
 
             let mut text_buf = String::new();
@@ -562,6 +568,9 @@ impl Agent {
                         StreamEvent::TextDelta { text } => {
                             self.emit(&text);
                             text_buf.push_str(&text);
+                        }
+                        StreamEvent::ReasoningDelta { text } => {
+                            self.emit_debug(&text);
                         }
                         StreamEvent::TextDone { .. } => {}
                         StreamEvent::ToolUseStart { id, name } => {
