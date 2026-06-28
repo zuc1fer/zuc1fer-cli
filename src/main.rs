@@ -8,7 +8,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(std::env::var("ZUC1FER_LOG").unwrap_or_else(|_| "info".into()))
+        .with_env_filter(std::env::var("ZUC1FER_LOG").unwrap_or_else(|_| "info,tantivy=warn,notify=warn".into()))
         .init();
 
     let args: Vec<String> = std::env::args().collect();

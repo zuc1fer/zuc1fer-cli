@@ -109,6 +109,13 @@ impl Indexer {
             }
 
             for path in &event.paths {
+                let path_str = path.to_string_lossy();
+                if path_str.contains(".zuc1fer")
+                    || path_str.contains(".git")
+                    || path_str.contains("target")
+                {
+                    continue;
+                }
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                 let name = path
                     .file_name()
