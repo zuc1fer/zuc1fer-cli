@@ -73,7 +73,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     use ratatui::backend::CrosstermBackend;
     use ratatui::Terminal;
     use std::sync::Arc;
-    use zuc1fer_tui::{App, ChatLine};
+    use zuc1fer_tui::App;
 
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -153,17 +153,17 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                 }
             } else if text.starts_with("__ERROR__:") {
                 if let Some(err) = text.strip_prefix("__ERROR__:") {
-                    app.add_message(ChatLine::Error(err.to_string()));
+                    app.add_system_message(format!("Error: {err}"));
                 }
             } else if app.streaming {
                 app.append_stream(&text);
             } else {
-                app.add_message(ChatLine::Assistant(text));
+                app.add_message(text);
             }
         }
         while let Ok(dbg) = debug_rx.try_recv() {
             if dbg.contains("Running") || dbg.contains("Error") || dbg.contains("retrying") {
-                app.add_message(ChatLine::Status(dbg));
+                app.add_system_message(dbg);
             }
         }
         while let Ok(_) = done_rx.try_recv() {
@@ -186,7 +186,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                     let prompt = app.input.clone();
                     app.input.clear();
                     app.cursor = 0;
-                    app.add_message(ChatLine::User(prompt.clone()));
+                    app.add_user_message(prompt.clone());
                     app.status = "Thinking...".into();
                     let _ = prompt_tx.send(prompt);
                 } else {
