@@ -165,7 +165,22 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
             }
         }
         while let Ok(dbg) = debug_rx.try_recv() {
-            if dbg.contains("Running") || dbg.contains("Error") || dbg.contains("retrying") {
+            if let Some(rest) = dbg.strip_prefix("__REPO__:") {
+                if let Ok(data) = serde_json::from_str::<serde_json::Value>(rest) {
+                    app.repo_files.clear();
+                    if let Some(files) = data["files"].as_array() {
+                        for entry in files {
+                            if let Some(arr) = entry.as_array() {
+                                if arr.len() == 2 {
+                                    let path = arr[0].as_str().unwrap_or("").to_string();
+                                    let score = arr[1].as_f64().unwrap_or(0.0);
+                                    app.repo_files.push((path, score));
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if dbg.contains("Running") || dbg.contains("Error") || dbg.contains("retrying") {
                 app.add_system_message(dbg);
             }
         }

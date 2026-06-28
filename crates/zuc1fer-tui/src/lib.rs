@@ -19,6 +19,8 @@ pub struct App {
     pub tokens_out: u64,
     pub running: bool,
     pub streaming: bool,
+    pub repo_files: Vec<(String, f64)>,
+    pub show_repo_panel: bool,
     last_assistant_idx: usize,
     scroll_offset: Cell<usize>,
     auto_scroll: Cell<bool>,
@@ -49,6 +51,8 @@ impl App {
             tokens_out: 0,
             running: true,
             streaming: false,
+            repo_files: Vec::new(),
+            show_repo_panel: false,
             last_assistant_idx: 0,
             scroll_offset: Cell::new(0),
             auto_scroll: Cell::new(true),
@@ -118,6 +122,9 @@ impl App {
         match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.running = false;
+            }
+            KeyCode::Tab => {
+                self.show_repo_panel = !self.show_repo_panel;
             }
             KeyCode::Char(c) if !self.streaming => {
                 self.input.insert(self.cursor, c);
@@ -192,10 +199,22 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .split(area);
 
     let msg_area = chunks[1];
-    app.view_height.set(msg_area.height as usize);
+
+    if app.show_repo_panel && msg_area.width > 40 {
+        let h_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .split(msg_area);
+
+        app.view_height.set(h_chunks[0].height as usize);
+        draw_messages(frame, h_chunks[0], app);
+        draw_repo_panel(frame, h_chunks[1], app);
+    } else {
+        app.view_height.set(msg_area.height as usize);
+        draw_messages(frame, msg_area, app);
+    }
 
     draw_header(frame, chunks[0], app);
-    draw_messages(frame, msg_area, app);
     draw_input(frame, chunks[2], app);
 }
 
@@ -211,14 +230,58 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         String::new()
     };
+    let panel_indicator = if app.show_repo_panel { " [Tab]" } else { "" };
     let text = format!(
-        " zuc1fer | {} | {}in {}out | {}{}",
-        app.model, app.tokens_in, app.tokens_out, app.status, scrolled
+        " zuc1fer | {} | {}in {}out | {}{}{}",
+        app.model, app.tokens_in, app.tokens_out, app.status, scrolled, panel_indicator
     );
     frame.render_widget(
         Paragraph::new(text).style(Style::default().bg(Color::DarkGray).fg(Color::White)),
         area,
     );
+}
+
+fn draw_repo_panel(frame: &mut Frame, area: Rect, app: &App) {
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(vec![Span::styled(
+        " Repository Map ",
+        Style::default().fg(Color::Cyan),
+    )]));
+    lines.push(Line::from(""));
+
+    if app.repo_files.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            " (no data yet)",
+            Style::default().fg(Color::DarkGray),
+        )]));
+    } else {
+        for (path, score) in &app.repo_files {
+            let line = if *score > 0.5 {
+                Line::from(vec![Span::styled(
+                    format!(" {:.3}  {}", score, path),
+                    Style::default().fg(Color::White),
+                )])
+            } else if *score > 0.1 {
+                Line::from(vec![Span::styled(
+                    format!(" {:.3}  {}", score, path),
+                    Style::default().fg(Color::Gray),
+                )])
+            } else {
+                Line::from(vec![Span::styled(
+                    format!(" {:.3}  {}", score, path),
+                    Style::default().fg(Color::DarkGray),
+                )])
+            };
+            lines.push(line);
+        }
+    }
+
+    let panel = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::LEFT)
+            .border_style(Style::default().fg(Color::DarkGray)),
+    );
+    frame.render_widget(panel, area);
 }
 
 fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
