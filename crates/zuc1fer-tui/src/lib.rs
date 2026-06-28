@@ -31,12 +31,12 @@ pub struct App {
     pub palette_open: bool,
     pub palette_query: String,
     pub palette_selection: usize,
+    pub repo_scroll: usize,
     last_assistant_idx: usize,
     scroll_offset: Cell<usize>,
     auto_scroll: Cell<bool>,
     total_lines: Cell<usize>,
     view_height: Cell<usize>,
-    scrollbar_state: Cell<ScrollbarState>,
 }
 
 pub struct Message {
@@ -79,12 +79,12 @@ impl App {
             palette_open: false,
             palette_query: String::new(),
             palette_selection: 0,
+            repo_scroll: 0,
             last_assistant_idx: 0,
             scroll_offset: Cell::new(0),
             auto_scroll: Cell::new(true),
             total_lines: Cell::new(0),
             view_height: Cell::new(24),
-            scrollbar_state: Cell::new(ScrollbarState::default()),
         }
     }
 
@@ -242,31 +242,47 @@ impl App {
                 }
             }
             KeyCode::PageUp => {
-                let page = self.view_height.get().saturating_sub(2);
-                self.scroll_offset
-                    .set(self.scroll_offset.get().saturating_sub(page));
-                self.auto_scroll.set(false);
+                if self.show_repo_panel && self.sidebar_tab == 0 {
+                    self.repo_scroll = self.repo_scroll.saturating_sub(10);
+                } else {
+                    let page = self.view_height.get().saturating_sub(2);
+                    self.scroll_offset
+                        .set(self.scroll_offset.get().saturating_sub(page));
+                    self.auto_scroll.set(false);
+                }
             }
             KeyCode::PageDown => {
-                let page = self.view_height.get().saturating_sub(2);
-                let max = self.max_scroll();
-                let new = (self.scroll_offset.get() + page).min(max);
-                self.scroll_offset.set(new);
-                if new >= max {
-                    self.auto_scroll.set(true);
+                if self.show_repo_panel && self.sidebar_tab == 0 {
+                    self.repo_scroll += 10;
+                } else {
+                    let page = self.view_height.get().saturating_sub(2);
+                    let max = self.max_scroll();
+                    let new = (self.scroll_offset.get() + page).min(max);
+                    self.scroll_offset.set(new);
+                    if new >= max {
+                        self.auto_scroll.set(true);
+                    }
                 }
             }
             KeyCode::Up => {
-                self.scroll_offset
-                    .set(self.scroll_offset.get().saturating_sub(1));
-                self.auto_scroll.set(false);
+                if self.show_repo_panel && self.sidebar_tab == 0 {
+                    self.repo_scroll = self.repo_scroll.saturating_sub(1);
+                } else {
+                    self.scroll_offset
+                        .set(self.scroll_offset.get().saturating_sub(1));
+                    self.auto_scroll.set(false);
+                }
             }
             KeyCode::Down => {
-                let max = self.max_scroll();
-                let new = (self.scroll_offset.get() + 1).min(max);
-                self.scroll_offset.set(new);
-                if new >= max {
-                    self.auto_scroll.set(true);
+                if self.show_repo_panel && self.sidebar_tab == 0 {
+                    self.repo_scroll += 1;
+                } else {
+                    let max = self.max_scroll();
+                    let new = (self.scroll_offset.get() + 1).min(max);
+                    self.scroll_offset.set(new);
+                    if new >= max {
+                        self.auto_scroll.set(true);
+                    }
                 }
             }
             _ => {
@@ -534,6 +550,7 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_repo_tab(frame: &mut Frame, area: Rect, app: &App) {
+    let max_lines = area.height.saturating_sub(1) as usize;
     let mut lines: Vec<Line> = Vec::new();
     if app.repo_files.is_empty() {
         lines.push(Line::from(vec![Span::styled(
@@ -547,14 +564,38 @@ fn draw_repo_tab(frame: &mut Frame, area: Rect, app: &App) {
         let tree = build_file_tree(&sorted);
         render_tree(&mut lines, &tree, "");
     }
+    let total = lines.len();
+    let scroll = app.repo_scroll.min(total.saturating_sub(max_lines.max(1)));
+    let visible: Vec<Line> = lines.into_iter().skip(scroll).take(max_lines).collect();
+
     frame.render_widget(
-        Paragraph::new(lines).block(
+        Paragraph::new(visible).block(
             Block::default()
                 .borders(Borders::LEFT)
                 .border_style(Style::default().fg(Color::DarkGray)),
         ),
         area,
     );
+
+    if total > max_lines {
+        let state = ScrollbarState::default()
+            .content_length(total)
+            .viewport_content_length(max_lines)
+            .position(scroll);
+        let sb_area = Rect {
+            x: area.x + area.width.saturating_sub(1),
+            y: area.y,
+            width: 1,
+            height: area.height,
+        };
+        frame.render_stateful_widget(
+            Scrollbar::default()
+                .orientation(ScrollbarOrientation::VerticalRight)
+                .style(Style::default().fg(Color::DarkGray)),
+            sb_area,
+            &mut state.clone(),
+        );
+    }
 }
 
 fn build_file_tree(files: &[(String, f64)]) -> Vec<FileTreeNode> {
@@ -773,27 +814,25 @@ fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
 
     frame.render_widget(Paragraph::new(lines), area);
 
-    if total > max_lines {
-        let mut state = ScrollbarState::default()
-            .content_length(total)
-            .viewport_content_length(max_lines)
-            .position(effective_scroll);
+    let state = ScrollbarState::default()
+        .content_length(total.max(1))
+        .viewport_content_length(max_lines.max(1))
+        .position(effective_scroll.min(total.saturating_sub(max_lines.max(1))));
 
-        let scrollbar_area = Rect {
-            x: area.x + area.width.saturating_sub(1),
-            y: area.y,
-            width: 1,
-            height: area.height,
-        };
-        frame.render_stateful_widget(
-            Scrollbar::default()
-                .orientation(ScrollbarOrientation::VerticalRight)
-                .style(Style::default().fg(Color::DarkGray)),
-            scrollbar_area,
-            &mut state,
-        );
-        app.scrollbar_state.set(state);
-    }
+    let scrollbar_area = Rect {
+        x: area.x + area.width.saturating_sub(1),
+        y: area.y,
+        width: 1,
+        height: area.height,
+    };
+    let mut s = state;
+    frame.render_stateful_widget(
+        Scrollbar::default()
+            .orientation(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(Color::DarkGray)),
+        scrollbar_area,
+        &mut s,
+    );
 }
 
 fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> Vec<Line<'static>> {
