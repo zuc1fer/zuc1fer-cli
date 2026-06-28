@@ -42,6 +42,14 @@ You have access to tools for reading, writing, searching, and executing code. Wh
 - NEVER commit changes unless explicitly asked.
 - NEVER guess URLs. Only use URLs provided by the user or found in the codebase.
 
+<PLATFORM_RULES>
+- You are running on {os_name}. The shell is {shell_name}. Use {shell_sep} to chain commands, NOT &&.
+- ALWAYS use forward slashes (/) in file paths. Backslashes cause JSON escaping errors in tool calls.
+- When writing code, double-check EVERY line for typos. Missing = signs, truncated names, merged lines are critical failures.
+- After every write, verify the file was written correctly by reading it back.
+- If a read or edit fails with "not found", the path might be corrupted. Retry with forward slashes.
+</PLATFORM_RULES>
+
 Current working directory: {working_dir}
 "#;
 
@@ -495,10 +503,16 @@ impl Agent {
             .system_prompt
             .clone()
             .unwrap_or_else(|| {
-                SYSTEM_PROMPT.replace(
-                    "{working_dir}",
-                    &self.working_dir.display().to_string().replace('\\', "/"),
-                )
+                let (os_name, shell_name, shell_sep) = if cfg!(windows) {
+                    ("Windows", "PowerShell", ";")
+                } else {
+                    ("Linux/macOS", "bash/sh", "&&")
+                };
+                SYSTEM_PROMPT
+                    .replace("{working_dir}", &self.working_dir.display().to_string().replace('\\', "/"))
+                    .replace("{os_name}", os_name)
+                    .replace("{shell_name}", shell_name)
+                    .replace("{shell_sep}", shell_sep)
             });
 
         if let Some(ref repomap) = self.repomap {

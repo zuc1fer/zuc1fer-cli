@@ -59,10 +59,41 @@ impl Tool for WriteTool {
         let existed = path.exists();
         std::fs::write(&path, content)?;
 
+        let verify = std::fs::read_to_string(&path).unwrap_or_default();
+        if verify != content {
+            let diff = diff_strings(content, &verify);
+            return Ok(ToolResult::error(
+                &call.id,
+                format!(
+                    "Write verification FAILED. Content on disk differs from what was sent.\n\
+                     Sent {} chars, got {} chars on disk.\n\
+                     First difference at char {}:\n\
+                     Expected: ...{}...\n\
+                     Got:      ...{}...\n\
+                     This may indicate path corruption or encoding issues.",
+                    content.len(),
+                    verify.len(),
+                    diff.0,
+                    &content[diff.0.saturating_sub(20)..(diff.0 + 20).min(content.len())],
+                    &verify[diff.0.saturating_sub(20)..(diff.0 + 20).min(verify.len())],
+                ),
+            ));
+        }
+
         if existed {
-            Ok(ToolResult::success(&call.id, format!("File overwritten: {}", path.display())))
+            Ok(ToolResult::success(&call.id, format!("File overwritten (verified): {}", path.display())))
         } else {
-            Ok(ToolResult::success(&call.id, format!("File created: {}", path.display())))
+            Ok(ToolResult::success(&call.id, format!("File created (verified): {}", path.display())))
         }
     }
+}
+
+fn diff_strings(a: &str, b: &str) -> (usize, char, char) {
+    for (i, (ca, cb)) in a.chars().zip(b.chars()).enumerate() {
+        if ca != cb {
+            return (i, ca, cb);
+        }
+    }
+    let len = a.len().min(b.len());
+    (len, '\0', '\0')
 }
