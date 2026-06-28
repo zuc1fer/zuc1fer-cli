@@ -118,6 +118,32 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     let mut app = App::new(&model);
 
     loop {
+        while let Ok(prompt) = prompt_rx.try_recv() {
+            let agent_clone = agent.clone();
+            let session_clone = session.clone();
+            let text_tx_clone = text_tx.clone();
+            let done_tx_clone = done_tx.clone();
+
+            app.streaming = true;
+            app.stream_buffer.clear();
+            app.scroll = 0;
+
+            rt.spawn(async move {
+                let mut s = session_clone.lock().await;
+                let result = agent_clone.run(&mut s, &prompt).await;
+                match result {
+                    Ok(response) => {
+                        if let Some(usage) = &response.usage {
+                            let _ = text_tx_clone.send(format!("__TOKENS__:{}:{}", usage.prompt_tokens, usage.completion_tokens));
+                        }
+                    }
+                    Err(e) => {
+                        let _ = text_tx_clone.send(format!("__ERROR__:{}", e));
+                    }
+                }
+                let _ = done_tx_clone.send(true);
+            });
+        }
         while let Ok(text) = text_rx.try_recv() {
             if text.starts_with("__TOKENS__:") {
                 if let Some(rest) = text.strip_prefix("__TOKENS__:") {
@@ -141,31 +167,6 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
             if dbg.contains("Running") || dbg.contains("Error") || dbg.contains("retrying") {
                 app.add_message(ChatLine::Status(dbg));
             }
-        }
-        while let Ok(prompt) = prompt_rx.try_recv() {
-            let agent_clone = agent.clone();
-            let session_clone = session.clone();
-            let text_tx_clone = text_tx.clone();
-            let done_tx_clone = done_tx.clone();
-
-            app.streaming = true;
-            app.stream_buffer.clear();
-
-            rt.spawn(async move {
-                let mut s = session_clone.lock().await;
-                let result = agent_clone.run(&mut s, &prompt).await;
-                match result {
-                    Ok(response) => {
-                        if let Some(usage) = &response.usage {
-                            let _ = text_tx_clone.send(format!("__TOKENS__:{}:{}", usage.prompt_tokens, usage.completion_tokens));
-                        }
-                    }
-                    Err(e) => {
-                        let _ = text_tx_clone.send(format!("__ERROR__:{}", e));
-                    }
-                }
-                let _ = done_tx_clone.send(true);
-            });
         }
         while let Ok(_) = done_rx.try_recv() {
             if app.streaming && !app.stream_buffer.is_empty() {
