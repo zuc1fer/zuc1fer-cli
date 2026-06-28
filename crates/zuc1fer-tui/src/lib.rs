@@ -832,8 +832,8 @@ fn draw_repo_tab(frame: &mut Frame, area: Rect, app: &App) {
 
     if total > max_lines {
         let state = ScrollbarState::default()
-            .content_length(total)
-            .viewport_content_length(max_lines)
+            .content_length(total.max(1))
+            .viewport_content_length(max_lines.max(1))
             .position(scroll);
         let sb_area = Rect {
             x: area.x + area.width.saturating_sub(1),
@@ -977,7 +977,7 @@ fn draw_session_tab(frame: &mut Frame, area: Rect, app: &App) {
         )]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            " Msgs: 0",
+            format!(" Msgs: {}", app.messages.len()),
             Style::default().fg(Color::DarkGray),
         )]),
     ];

@@ -228,7 +228,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
         while turn_rx.try_recv().is_ok() {
             app.next_turn();
         }
-        while let Ok(_) = done_rx.try_recv() {
+        while done_rx.try_recv().is_ok() {
             app.end_streaming();
             app.status = "Ready".into();
         }
@@ -248,8 +248,17 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                     if key.code == crossterm::event::KeyCode::Enter && !app.streaming {
                         if app.palette_open || app.show_model_picker || app.show_session_picker {
                             if let Some(cmd) = app.handle_key(key) {
-                                if let Some(model) = cmd.strip_prefix("__MODEL_SELECT__:") {
-                                    app.add_system_message(format!("Model selected: {model}. Restart with --model={model} to apply."));
+                                if let Some(model_name) = cmd.strip_prefix("__MODEL_SELECT__:") {
+                                    let model = model_name.to_string();
+                                    let session_mutex = session.clone();
+                                    let m = model.clone();
+                                    rt.spawn(async move {
+                                        let mut s = session_mutex.lock().await;
+                                        s.model = m;
+                                    });
+                                    app.model = model;
+                                    app.update_cost();
+                                    app.add_system_message(format!("Switched to model: {}", model_name));
                                 } else if let Some(sid) = cmd.strip_prefix("__SESSION_SELECT__:") {
                                     app.add_system_message(format!("Session selected: {sid}. Use 'zuc1fer session resume {sid}' to resume."));
                                 } else {
@@ -461,7 +470,7 @@ fn list_sessions() -> anyhow::Result<()> {
         println!("No saved sessions.");
         return Ok(());
     }
-    println!("{:<36} {:<30} {:>6} {:>8}  {}", "ID", "MODEL", "MSGS", "TOKENS", "UPDATED");
+    println!("{:<36} {:<30} {:>6} {:>8}  UPDATED", "ID", "MODEL", "MSGS", "TOKENS");
     for s in &sessions {
         println!(
             "{:<36} {:<30} {:>6} {:>8}  {}",
@@ -503,10 +512,7 @@ fn resume_session(id: &str) -> anyhow::Result<()> {
         if input == "/quit" || input == "/exit" || input == "/q" { break; }
 
         let result = rt.block_on(agent.run(&mut session, &input));
-        match result {
-            Err(e) => eprintln!("Error: {e}"),
-            _ => {}
-        }
+        if let Err(e) = result { eprintln!("Error: {e}") }
     }
     Ok(())
 }
