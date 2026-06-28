@@ -41,9 +41,15 @@ impl Tool for ReadTool {
         };
 
         if !path.exists() {
+            let alt = try_fuzzy_path(path_str, &ctx.working_dir);
+            if let Some(fixed) = alt {
+                if fixed.exists() {
+                    return self.read_file(&call.id, &fixed, call);
+                }
+            }
             return Ok(ToolResult::error(
                 &call.id,
-                format!("File not found: {}", path.display()),
+                format!("File not found: {}. Try with forward slashes in the path.", path.display()),
             ));
         }
 
@@ -65,7 +71,13 @@ impl Tool for ReadTool {
             ));
         }
 
-        let content = std::fs::read_to_string(&path)?;
+        self.read_file(&call.id, &path, call)
+    }
+}
+
+impl ReadTool {
+    fn read_file(&self, id: &str, path: &PathBuf, call: &ToolCall) -> anyhow::Result<ToolResult> {
+        let content = std::fs::read_to_string(path)?;
         let lines: Vec<&str> = content.lines().collect();
 
         let offset = call.arguments["offset"].as_u64().unwrap_or(1).max(1) as usize;
@@ -81,7 +93,7 @@ impl Tool for ReadTool {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let mut result = ToolResult::success(&call.id, output);
+        let mut result = ToolResult::success(id, output);
 
         if end < lines.len() {
             result
@@ -95,4 +107,19 @@ impl Tool for ReadTool {
 
         Ok(result)
     }
+}
+
+fn try_fuzzy_path(path_str: &str, _working_dir: &PathBuf) -> Option<PathBuf> {
+    let p = PathBuf::from(path_str);
+    if p.is_absolute() {
+        let swapped = PathBuf::from(path_str.replace('\\', "/"));
+        if swapped != p && swapped.exists() {
+            return Some(swapped);
+        }
+        let swapped_back = PathBuf::from(path_str.replace('/', "\\"));
+        if swapped_back != p && swapped_back.exists() {
+            return Some(swapped_back);
+        }
+    }
+    None
 }
