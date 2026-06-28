@@ -39,6 +39,7 @@ pub struct App {
     pub sessions: Vec<SessionInfo>,
     pub show_session_picker: bool,
     pub session_picker_selection: usize,
+    pub todos: Vec<TodoItem>,
     last_assistant_idx: usize,
     scroll_offset: Cell<usize>,
     auto_scroll: Cell<bool>,
@@ -55,6 +56,12 @@ pub enum MessageRole {
     User,
     Assistant,
     System,
+}
+
+#[derive(Clone)]
+pub struct TodoItem {
+    pub text: String,
+    pub done: bool,
 }
 
 #[derive(Clone)]
@@ -103,6 +110,7 @@ impl App {
             sessions: Vec::new(),
             show_session_picker: false,
             session_picker_selection: 0,
+            todos: Vec::new(),
             last_assistant_idx: 0,
             scroll_offset: Cell::new(0),
             auto_scroll: Cell::new(true),
@@ -151,6 +159,50 @@ impl App {
 
     pub fn end_streaming(&mut self) {
         self.streaming = false;
+        self.parse_todos();
+    }
+
+    fn parse_todos(&mut self) {
+        let mut items: Vec<TodoItem> = Vec::new();
+        for msg in &self.messages {
+            for line in msg.text.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed
+                    .strip_prefix("- [x] ")
+                    .or_else(|| trimmed.strip_prefix("- [X] "))
+                {
+                    items.push(TodoItem {
+                        text: rest.to_string(),
+                        done: true,
+                    });
+                } else if let Some(rest) = trimmed.strip_prefix("- [ ] ") {
+                    items.push(TodoItem {
+                        text: rest.to_string(),
+                        done: false,
+                    });
+                } else if let Some(rest) = trimmed
+                    .strip_prefix("[x] ")
+                    .or_else(|| trimmed.strip_prefix("[X] "))
+                {
+                    items.push(TodoItem {
+                        text: rest.to_string(),
+                        done: true,
+                    });
+                } else if let Some(rest) = trimmed.strip_prefix("[ ] ") {
+                    items.push(TodoItem {
+                        text: rest.to_string(),
+                        done: false,
+                    });
+                } else if trimmed.starts_with("✅") || trimmed.starts_with("- ✅") {
+                    let text = trimmed
+                        .trim_start_matches("- ")
+                        .trim_start_matches("✅ ")
+                        .to_string();
+                    items.push(TodoItem { text, done: true });
+                }
+            }
+        }
+        self.todos = items;
     }
 
     pub fn next_turn(&mut self) {
@@ -316,7 +368,7 @@ impl App {
             }
             KeyCode::Tab => {
                 if self.show_repo_panel {
-                    self.sidebar_tab = (self.sidebar_tab + 1) % 3;
+                    self.sidebar_tab = (self.sidebar_tab + 1) % 4;
                 } else {
                     self.show_repo_panel = true;
                 }
@@ -474,8 +526,8 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
         String::new()
     };
     let panel_indicator = if app.show_repo_panel {
-        let tab_names = ["RepoMap", "Session", "MCPs"];
-        format!(" [Tab:{}]", tab_names[app.sidebar_tab.min(2)])
+        let tab_names = ["RepoMap", "Session", "MCPs", "Todos"];
+        format!(" [Tab:{}]", tab_names[app.sidebar_tab.min(3)])
     } else {
         String::new()
     };
@@ -722,7 +774,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 }
 
 fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App) {
-    let tab_titles = vec![" RepoMap ", " Session ", " MCPs "];
+    let tab_titles = vec![" RepoMap ", " Session ", " MCPs ", " Todos "];
     let tabs = Tabs::new(tab_titles)
         .block(
             Block::default()
@@ -745,6 +797,7 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App) {
         0 => draw_repo_tab(frame, content_area, app),
         1 => draw_session_tab(frame, content_area, app),
         2 => draw_mcp_tab(frame, content_area, app),
+        3 => draw_todos_tab(frame, content_area, app),
         _ => {}
     }
 }
@@ -972,6 +1025,61 @@ fn draw_mcp_tab(frame: &mut Frame, area: Rect, app: &App) {
         " Configure in config.toml",
         Style::default().fg(Color::DarkGray),
     )]));
+
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::LEFT)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        ),
+        area,
+    );
+}
+
+fn draw_todos_tab(frame: &mut Frame, area: Rect, app: &App) {
+    let done_count = app.todos.iter().filter(|t| t.done).count();
+    let total = app.todos.len();
+    let pct = if total > 0 {
+        (done_count * 100) / total
+    } else {
+        0
+    };
+
+    let mut lines = vec![
+        Line::from(vec![Span::styled(
+            format!(" Progress: {}/{} ({}%)", done_count, total, pct),
+            Style::default().fg(Color::Cyan),
+        )]),
+        Line::from(""),
+    ];
+
+    if app.todos.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            " No todos found in conversation.",
+            Style::default().fg(Color::DarkGray),
+        )]));
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled(
+            " Use checkboxes in prompts:",
+            Style::default().fg(Color::DarkGray),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            " - [ ] Task name",
+            Style::default().fg(Color::DarkGray),
+        )]));
+    } else {
+        for item in &app.todos {
+            let (icon, color) = if item.done {
+                (" [x] ", Color::Green)
+            } else {
+                (" [ ] ", Color::Gray)
+            };
+            lines.push(Line::from(vec![
+                Span::styled(icon, Style::default().fg(color)),
+                Span::styled(&item.text, Style::default().fg(color)),
+            ]));
+        }
+    }
 
     frame.render_widget(
         Paragraph::new(lines).block(
