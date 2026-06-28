@@ -1,3 +1,4 @@
+use crate::ts_parser::TsParser;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -88,113 +89,18 @@ impl RepoMap {
             Err(_) => return Ok(()),
         };
 
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-
-        for (idx, line) in content.lines().enumerate() {
-            let trimmed = line.trim();
-            let sym = match ext {
-                "rs" => self.parse_rust_symbol(trimmed),
-                "py" => self.parse_python_symbol(trimmed),
-                "js" | "ts" | "jsx" | "tsx" => self.parse_js_symbol(trimmed),
-                "go" => self.parse_go_symbol(trimmed),
-                "c" | "cpp" | "h" | "hpp" => self.parse_c_symbol(trimmed),
-                "java" | "kt" | "scala" => self.parse_java_symbol(trimmed),
-                _ => None,
-            };
-
-            if let Some((name, kind, sig)) = sym {
-                self.symbols.push(Arc::new(Symbol {
-                    name,
-                    kind,
-                    file: path.to_path_buf(),
-                    line: idx + 1,
-                    signature: sig,
-                }));
-            }
+        let mut parser = TsParser::new();
+        for sym in parser.extract_symbols(path, &content) {
+            self.symbols.push(Arc::new(Symbol {
+                name: sym.name,
+                kind: sym.kind,
+                file: path.to_path_buf(),
+                line: sym.line,
+                signature: sym.signature,
+            }));
         }
 
         Ok(())
-    }
-
-    fn parse_rust_symbol(&self, line: &str) -> Option<(String, String, String)> {
-        let re = regex::Regex::new(
-            r"^\s*(?:pub(?:\s*\(\s*(?:crate|super|self)\s*\))?\s+)?(fn|struct|enum|trait|impl|mod|type|const|static)\s+(\w+)"
-        ).ok()?;
-        let caps = re.captures(line)?;
-        let kind = caps.get(1)?.as_str().to_string();
-        let name = caps.get(2)?.as_str().to_string();
-
-        if name.chars().next()?.is_uppercase() || kind == "fn" || kind == "mod" {
-            let sig = line.trim().to_string();
-            Some((name, kind, sig))
-        } else {
-            None
-        }
-    }
-
-    fn parse_python_symbol(&self, line: &str) -> Option<(String, String, String)> {
-        let re = regex::Regex::new(r"^\s*(def|class|async def)\s+(\w+)").ok()?;
-        let caps = re.captures(line)?;
-        let kind = caps.get(1)?.as_str().to_string();
-        let name = caps.get(2)?.as_str().to_string();
-        Some((name, kind, line.trim().to_string()))
-    }
-
-    fn parse_js_symbol(&self, line: &str) -> Option<(String, String, String)> {
-        let re = regex::Regex::new(
-            r"^\s*(?:export\s+(?:default\s+)?)?(?:async\s+)?(?:function|class|const|let|var)\s+(\w+)"
-        ).ok()?;
-        let caps = re.captures(line)?;
-        let name = caps.get(1)?.as_str().to_string();
-
-        let kind = if line.contains("function") || line.contains("=>") {
-            "function"
-        } else if line.contains("class") {
-            "class"
-        } else {
-            "const"
-        };
-
-        Some((name, kind.to_string(), line.trim().to_string()))
-    }
-
-    fn parse_go_symbol(&self, line: &str) -> Option<(String, String, String)> {
-        let re = regex::Regex::new(r"^\s*(?:func|type)\s+(\w+)").ok()?;
-        let caps = re.captures(line)?;
-        let name = caps.get(1)?.as_str().to_string();
-        let kind = if line.contains("func") {
-            "func"
-        } else {
-            "type"
-        };
-        Some((name, kind.to_string(), line.trim().to_string()))
-    }
-
-    fn parse_c_symbol(&self, line: &str) -> Option<(String, String, String)> {
-        let re =
-            regex::Regex::new(r"^\s*(?:[\w:]+\s+)+(\w+)\s*\([^)]*\)\s*(?:const\s*)?\{?").ok()?;
-        let caps = re.captures(line)?;
-        let name = caps.get(1)?.as_str().to_string();
-        if name == "if" || name == "while" || name == "for" || name == "switch" {
-            return None;
-        }
-        Some((name, "func".into(), line.trim().to_string()))
-    }
-
-    fn parse_java_symbol(&self, line: &str) -> Option<(String, String, String)> {
-        let re = regex::Regex::new(
-            r"^\s*(?:public|private|protected)?\s*(?:static|abstract|final)?\s*(?:class|interface|enum)\s+(\w+)"
-        ).ok()?;
-        let caps = re.captures(line)?;
-        let name = caps.get(1)?.as_str().to_string();
-        let kind = if line.contains("class") {
-            "class"
-        } else if line.contains("interface") {
-            "interface"
-        } else {
-            "enum"
-        };
-        Some((name, kind.to_string(), line.trim().to_string()))
     }
 
     fn build_dependency_graph(&mut self) {
@@ -204,7 +110,7 @@ impl RepoMap {
             let file_str = sym.file.to_string_lossy().to_string();
             let content = std::fs::read_to_string(&sym.file).unwrap_or_default();
 
-            let imports = self.extract_imports(&content, &sym.file);
+            let imports = self.extract_imports(&sym.file, &content);
             let target_files: Vec<String> = imports
                 .into_iter()
                 .filter_map(|import_path| {
@@ -226,44 +132,42 @@ impl RepoMap {
         self.score_map = self.pagerank(&edges);
     }
 
-    fn extract_imports(&self, content: &str, _file: &Path) -> Vec<String> {
-        let mut imports = Vec::new();
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if let Some(path) = self.parse_import_line(trimmed) {
-                imports.push(path);
-            }
-        }
-        imports
+    fn extract_imports(&self, path: &Path, content: &str) -> Vec<String> {
+        let mut parser = TsParser::new();
+        let raw = parser.extract_imports(path, content);
+        raw.into_iter()
+            .filter_map(|imp| self.normalize_import(path, &imp))
+            .collect()
     }
 
-    fn parse_import_line(&self, line: &str) -> Option<String> {
-        if line.starts_with("use ") {
-            let rest = line.strip_prefix("use ")?;
+    fn normalize_import(&self, _from_file: &Path, import_line: &str) -> Option<String> {
+        let trimmed = import_line.trim();
+        if trimmed.starts_with("use ") {
+            let rest = trimmed.strip_prefix("use ")?;
             if let Some(idx) = rest.find("::") {
                 Some(rest[..idx].to_string())
             } else {
                 Some(rest.trim_end_matches(';').to_string())
             }
-        } else if line.starts_with("import ") {
-            let rest = line.strip_prefix("import ")?;
+        } else if trimmed.starts_with("import ") {
+            let rest = trimmed.strip_prefix("import ")?;
             let parts: Vec<&str> = rest.split_whitespace().collect();
             if parts.len() >= 2 {
                 Some(parts[1].trim_matches('"').trim_matches('\'').to_string())
             } else {
                 None
             }
-        } else if line.starts_with("from ") {
-            let rest = line.strip_prefix("from ")?;
+        } else if trimmed.starts_with("from ") {
+            let rest = trimmed.strip_prefix("from ")?;
             rest.split_whitespace().next().map(|s| s.to_string())
-        } else if line.starts_with("require(") {
-            let rest = line.strip_prefix("require(")?;
-            rest.trim_end_matches(");")
-                .trim_matches('"')
-                .trim_matches('\'')
-                .split('/')
+        } else if trimmed.starts_with("import (") {
+            trimmed
+                .trim_start_matches("import (")
+                .trim_end_matches(')')
+                .split_whitespace()
                 .next()
-                .map(|s| s.to_string())
+                .filter(|p| p.starts_with('"'))
+                .map(|p| p.trim_matches('"').to_string())
         } else {
             None
         }
@@ -273,7 +177,7 @@ impl RepoMap {
         let from_dir = from_file.parent().unwrap_or(Path::new(""));
 
         for candidate in &[
-            from_dir.join(&import),
+            from_dir.join(import),
             from_dir.join(format!("{import}.rs")),
             from_dir.join(format!("{import}.py")),
             from_dir.join(format!("{import}.ts")),
@@ -425,41 +329,142 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_rust_fn() {
-        let map = RepoMap::new(PathBuf::from("."), 1024);
-        let result = map.parse_rust_symbol("pub fn hello_world() -> String {");
-        assert!(result.is_some());
-        let (name, kind, _) = result.unwrap();
-        assert_eq!(name, "hello_world");
-        assert_eq!(kind, "fn");
+    fn test_extract_rust_symbols_from_source() {
+        let source = r#"
+pub fn hello_world() -> String {
+    "hello".into()
+}
+
+pub struct User {
+    name: String,
+}
+
+pub enum Status {
+    Active,
+    Inactive,
+}
+
+pub trait Handler {
+    fn handle(&self);
+}
+
+mod utils;
+const MAX_SIZE: usize = 1024;
+"#;
+        let mut parser = TsParser::new();
+        let path = Path::new("test.rs");
+        let symbols = parser.extract_symbols(path, source);
+
+        let names: Vec<String> = symbols.iter().map(|s| s.name.clone()).collect();
+        assert!(
+            names.contains(&"hello_world".to_string()),
+            "missing hello_world fn"
+        );
+        assert!(names.contains(&"User".to_string()), "missing User struct");
+        assert!(names.contains(&"Status".to_string()), "missing Status enum");
+        assert!(
+            names.contains(&"Handler".to_string()),
+            "missing Handler trait"
+        );
+        assert!(names.contains(&"utils".to_string()), "missing utils mod");
+        assert!(
+            names.contains(&"MAX_SIZE".to_string()),
+            "missing MAX_SIZE const"
+        );
     }
 
     #[test]
-    fn test_parse_python_def() {
-        let map = RepoMap::new(PathBuf::from("."), 1024);
-        let result = map.parse_python_symbol("def get_user(user_id: int) -> User:");
-        assert!(result.is_some());
-        let (name, kind, _) = result.unwrap();
-        assert_eq!(name, "get_user");
-        assert_eq!(kind, "def");
+    fn test_extract_python_symbols() {
+        let source = r#"
+def get_user(user_id: int) -> User:
+    pass
+
+class UserManager:
+    def create(self, name):
+        pass
+
+async def fetch_data():
+    pass
+"#;
+        let mut parser = TsParser::new();
+        let path = Path::new("test.py");
+        let symbols = parser.extract_symbols(path, source);
+
+        let names: Vec<String> = symbols.iter().map(|s| s.name.clone()).collect();
+        assert!(names.contains(&"get_user".to_string()), "missing get_user");
+        assert!(
+            names.contains(&"UserManager".to_string()),
+            "missing UserManager class"
+        );
+        assert!(
+            names.contains(&"fetch_data".to_string()),
+            "missing fetch_data"
+        );
     }
 
     #[test]
-    fn test_parse_rust_struct() {
-        let map = RepoMap::new(PathBuf::from("."), 1024);
-        let result = map.parse_rust_symbol("pub struct User {");
-        assert!(result.is_some());
-        let (name, kind, _) = result.unwrap();
-        assert_eq!(name, "User");
-        assert_eq!(kind, "struct");
+    fn test_extract_js_symbols() {
+        let source = r#"
+function fetchUsers() {
+    return [];
+}
+
+class ApiClient {
+    request() {}
+}
+
+export function init() {}
+
+const handler = () => {};
+"#;
+        let mut parser = TsParser::new();
+        let path = Path::new("test.js");
+        let symbols = parser.extract_symbols(path, source);
+
+        let names: Vec<String> = symbols.iter().map(|s| s.name.clone()).collect();
+        assert!(
+            names.contains(&"fetchUsers".to_string()),
+            "missing fetchUsers"
+        );
+        assert!(
+            names.contains(&"ApiClient".to_string()),
+            "missing ApiClient"
+        );
+        assert!(names.contains(&"init".to_string()), "missing init export");
     }
 
     #[test]
-    fn test_parse_js_export() {
+    fn test_extract_go_symbols() {
+        let source = r#"
+func NewServer() *Server {
+    return &Server{}
+}
+
+type Config struct {
+    Port int
+}
+
+func (s *Server) Start() error {
+    return nil
+}
+"#;
+        let mut parser = TsParser::new();
+        let path = Path::new("test.go");
+        let symbols = parser.extract_symbols(path, source);
+
+        let names: Vec<String> = symbols.iter().map(|s| s.name.clone()).collect();
+        assert!(
+            names.contains(&"NewServer".to_string()),
+            "missing NewServer"
+        );
+        assert!(names.contains(&"Config".to_string()), "missing Config type");
+        assert!(names.contains(&"Start".to_string()), "missing Start method");
+    }
+
+    #[test]
+    fn test_regex_import_parsing() {
         let map = RepoMap::new(PathBuf::from("."), 1024);
-        let result = map.parse_js_symbol("export function fetchUsers() {");
-        assert!(result.is_some());
-        let (name, kind, _) = result.unwrap();
-        assert_eq!(name, "fetchUsers");
+        let imp = map.normalize_import(Path::new("lib.rs"), "use std::collections::HashMap;");
+        assert_eq!(imp, Some("std".to_string()));
     }
 }
