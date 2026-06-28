@@ -41,7 +41,7 @@ impl Tool for ReadTool {
         };
 
         if !path.exists() {
-            let alt = try_fuzzy_path(path_str, &ctx.working_dir);
+            let alt = crate::try_fuzzy_path(path_str);
             if let Some(fixed) = alt {
                 if fixed.exists() {
                     return self.read_file(&call.id, &fixed, call);
@@ -107,19 +107,4 @@ impl ReadTool {
 
         Ok(result)
     }
-}
-
-fn try_fuzzy_path(path_str: &str, _working_dir: &PathBuf) -> Option<PathBuf> {
-    let p = PathBuf::from(path_str);
-    if p.is_absolute() {
-        let swapped = PathBuf::from(path_str.replace('\\', "/"));
-        if swapped != p && swapped.exists() {
-            return Some(swapped);
-        }
-        let swapped_back = PathBuf::from(path_str.replace('/', "\\"));
-        if swapped_back != p && swapped_back.exists() {
-            return Some(swapped_back);
-        }
-    }
-    None
 }
