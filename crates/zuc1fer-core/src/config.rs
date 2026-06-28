@@ -97,6 +97,11 @@ impl Config {
                 }
             }
 
+            if config.model == "deepseek/deepseek-chat" {
+                config.model = "deepseek/deepseek-v4-pro".into();
+                std::fs::write(&config_path, toml::to_string_pretty(&config)?)?;
+            }
+
             Ok(config)
         } else {
             let config = Config::default();
