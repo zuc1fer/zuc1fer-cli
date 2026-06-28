@@ -510,8 +510,28 @@ fn handle_palette_command(app: &mut zuc1fer_tui::App, cmd: &str) {
         "/toggle-sidebar" => {
             app.show_repo_panel = !app.show_repo_panel;
         }
+        "/toggle-repo" => {
+            app.show_repo_panel = true;
+            app.sidebar_tab = 0;
+        }
+        "/model" | "/models" => {
+            app.add_system_message(format!(
+                "Current model: {}. Switch with --model= on startup, or set model in ~/.config/zuc1fer/config.toml",
+                app.model
+            ));
+        }
+        "/help" => {
+            app.add_system_message("Commands: /model /models /session /clear /quit /help /config /toggle-sidebar".into());
+        }
+        "/config" => {
+            let dir = zuc1fer_core::default_config_dir().unwrap_or_default();
+            app.add_system_message(format!("Config directory: {}", dir.display()));
+        }
+        "/session" => {
+            app.add_system_message("Session management: use 'zuc1fer session list' to see saved sessions.".into());
+        }
         _ => {
-            app.add_system_message(format!("Command: {cmd}"));
+            app.add_system_message(format!("Unknown command: {cmd}"));
         }
     }
 }

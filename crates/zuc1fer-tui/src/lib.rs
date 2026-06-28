@@ -160,6 +160,26 @@ impl App {
         self.cost_usd = in_cost + out_cost;
     }
 
+    fn selected_palette_command(&self) -> String {
+        let commands = palette_commands();
+        let q = self.palette_query.to_lowercase();
+        let filtered: Vec<&(&str, &str)> = if q.is_empty() {
+            commands.iter().collect()
+        } else {
+            commands
+                .iter()
+                .filter(|(cmd, desc)| {
+                    cmd.to_lowercase().contains(&q) || desc.to_lowercase().contains(&q)
+                })
+                .collect()
+        };
+        let idx = self.palette_selection.min(filtered.len().saturating_sub(1));
+        filtered
+            .get(idx)
+            .map(|(cmd, _)| cmd.to_string())
+            .unwrap_or_else(|| self.palette_query.clone())
+    }
+
     fn max_scroll(&self) -> usize {
         self.total_lines
             .get()
@@ -175,8 +195,8 @@ impl App {
                     self.palette_selection = 0;
                 }
                 KeyCode::Enter => {
+                    let cmd = self.selected_palette_command();
                     self.palette_open = false;
-                    let cmd = self.palette_query.clone();
                     self.palette_query.clear();
                     self.palette_selection = 0;
                     return Some(cmd);
@@ -308,10 +328,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     let msg_area = chunks[2];
 
-    if app.show_repo_panel && msg_area.width > 40 {
+    if app.show_repo_panel && msg_area.width > 35 {
         let h_chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
             .split(msg_area);
 
         app.view_height.set(h_chunks[0].height as usize);
@@ -397,11 +417,8 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(gauge, header_rows[1]);
 }
 
-fn draw_command_palette(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 50, frame.area());
-    frame.render_widget(Clear, area);
-
-    let commands = [
+fn palette_commands() -> [(&'static str, &'static str); 10] {
+    [
         ("/model", "Switch AI model"),
         ("/models", "List available models"),
         ("/session", "Manage sessions"),
@@ -411,7 +428,15 @@ fn draw_command_palette(frame: &mut Frame, app: &App) {
         ("/help", "Show help"),
         ("/config", "Show config path"),
         ("/toggle-sidebar", "Toggle sidebar panel"),
-    ];
+        ("/toggle-repo", "Toggle RepoMap sidebar"),
+    ]
+}
+
+fn draw_command_palette(frame: &mut Frame, app: &App) {
+    let area = centered_rect(60, 50, frame.area());
+    frame.render_widget(Clear, area);
+
+    let commands = palette_commands();
 
     let filtered: Vec<(&str, &str)> = if app.palette_query.is_empty() {
         commands.iter().copied().collect()
@@ -516,21 +541,108 @@ fn draw_repo_tab(frame: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(Color::DarkGray),
         )]));
     } else {
-        for (path, score) in &app.repo_files {
-            let color = if *score > 0.5 {
+        let mut sorted: Vec<(String, f64)> = app.repo_files.clone();
+        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let tree = build_file_tree(&sorted);
+        render_tree(&mut lines, &tree, "");
+    }
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::LEFT)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        ),
+        area,
+    );
+}
+
+fn build_file_tree(files: &[(String, f64)]) -> Vec<FileTreeNode> {
+    let mut roots: Vec<FileTreeNode> = Vec::new();
+    for (path, score) in files {
+        let parts: Vec<&str> = path.split('/').collect();
+        insert_into_tree(&mut roots, &parts, *score);
+    }
+    roots
+}
+
+#[derive(Clone)]
+struct FileTreeNode {
+    name: String,
+    score: Option<f64>,
+    children: Vec<FileTreeNode>,
+}
+
+fn insert_into_tree(nodes: &mut Vec<FileTreeNode>, parts: &[&str], score: f64) {
+    if parts.is_empty() {
+        return;
+    }
+    let name = parts[0].to_string();
+    if parts.len() == 1 {
+        nodes.push(FileTreeNode {
+            name,
+            score: Some(score),
+            children: vec![],
+        });
+        return;
+    }
+    let existing = nodes.iter_mut().find(|n| n.name == name);
+    if let Some(node) = existing {
+        insert_into_tree(&mut node.children, &parts[1..], score);
+    } else {
+        let mut new_node = FileTreeNode {
+            name: name.clone(),
+            score: None,
+            children: vec![],
+        };
+        insert_into_tree(&mut new_node.children, &parts[1..], score);
+        nodes.push(new_node);
+    }
+}
+
+fn render_tree(lines: &mut Vec<Line>, nodes: &[FileTreeNode], prefix: &str) {
+    for (i, node) in nodes.iter().enumerate() {
+        let is_node_last = i == nodes.len() - 1;
+        let connector = if is_node_last {
+            "└── "
+        } else {
+            "├── "
+        };
+
+        if let Some(score) = node.score {
+            let color = if score > 0.5 {
                 Color::White
-            } else if *score > 0.1 {
+            } else if score > 0.1 {
                 Color::Gray
             } else {
                 Color::DarkGray
             };
+            let name = node.name.clone();
+            let display_name = if name.len() > 24 {
+                format!("{}...", &name[..21])
+            } else {
+                name
+            };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{prefix}{connector}"),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(format!("{:.3}  ", score), Style::default().fg(color)),
+                Span::styled(display_name, Style::default().fg(color)),
+            ]));
+        } else {
             lines.push(Line::from(vec![Span::styled(
-                format!(" {:.3}  {}", score, path),
-                Style::default().fg(color),
+                format!("{prefix}{connector}{}", node.name),
+                Style::default().fg(Color::DarkGray),
             )]));
         }
+
+        if !node.children.is_empty() {
+            let new_prefix = format!("{}{}   ", prefix, if is_node_last { " " } else { "│" });
+            render_tree(lines, &node.children, &new_prefix);
+        }
     }
-    frame.render_widget(Paragraph::new(lines), area);
 }
 
 fn draw_session_tab(frame: &mut Frame, area: Rect, app: &App) {
