@@ -69,6 +69,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     use crossterm::{
         execute,
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen, Clear, ClearType},
+        event::{EnableMouseCapture, DisableMouseCapture},
     };
     use ratatui::backend::CrosstermBackend;
     use ratatui::Terminal;
@@ -114,7 +115,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
 
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    execute!(stdout, Clear(ClearType::All), EnterAlternateScreen)?;
+    execute!(stdout, Clear(ClearType::All), EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -199,26 +200,38 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
         }
 
         if crossterm::event::poll(std::time::Duration::from_millis(50))? {
-            if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
-                if key.kind != crossterm::event::KeyEventKind::Press {
-                    continue;
+            match crossterm::event::read()? {
+                crossterm::event::Event::Key(key) => {
+                    if key.kind != crossterm::event::KeyEventKind::Press {
+                        continue;
+                    }
+                    if key.code == crossterm::event::KeyCode::Enter && !app.streaming {
+                        let prompt = app.take_input();
+                        if prompt.is_empty() {
+                            continue;
+                        }
+                        app.add_user_message(prompt.clone());
+                        app.status = "Thinking...".into();
+                        let _ = prompt_tx.send(prompt);
+                    } else {
+                        app.handle_key(key);
+                    }
                 }
-                if key.code == crossterm::event::KeyCode::Enter && !app.input.is_empty() && !app.streaming {
-                    let prompt = app.input.clone();
-                    app.input.clear();
-                    app.cursor = 0;
-                    app.add_user_message(prompt.clone());
-                    app.status = "Thinking...".into();
-                    let _ = prompt_tx.send(prompt);
-                } else {
-                    app.handle_key(key);
+                crossterm::event::Event::Mouse(mouse) => {
+                    use crossterm::event::MouseEventKind;
+                    match mouse.kind {
+                        MouseEventKind::ScrollUp => app.handle_mouse_scroll(-1),
+                        MouseEventKind::ScrollDown => app.handle_mouse_scroll(1),
+                        _ => {}
+                    }
                 }
+                _ => {}
             }
-        }
+            }
     }
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), Clear(ClearType::All), LeaveAlternateScreen)?;
+    execute!(terminal.backend_mut(), Clear(ClearType::All), LeaveAlternateScreen, DisableMouseCapture)?;
 
     Ok(())
 }
