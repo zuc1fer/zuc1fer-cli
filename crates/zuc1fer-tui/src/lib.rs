@@ -3,16 +3,16 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
 use std::cell::Cell;
 use std::collections::VecDeque;
+use tui_textarea::TextArea;
 
 pub struct App {
     pub messages: VecDeque<Message>,
-    pub input: String,
-    pub cursor: usize,
+    pub input: TextArea<'static>,
     pub status: String,
     pub model: String,
     pub tokens_in: u64,
@@ -26,6 +26,7 @@ pub struct App {
     auto_scroll: Cell<bool>,
     total_lines: Cell<usize>,
     view_height: Cell<usize>,
+    scrollbar_state: Cell<ScrollbarState>,
 }
 
 pub struct Message {
@@ -41,10 +42,18 @@ pub enum MessageRole {
 
 impl App {
     pub fn new(model: &str) -> Self {
+        let mut input = TextArea::default();
+        input.set_block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
+        input.set_style(Style::default().fg(Color::White));
+        input.set_cursor_line_style(Style::default());
+
         Self {
             messages: VecDeque::new(),
-            input: String::new(),
-            cursor: 0,
+            input,
             status: String::from("Ready"),
             model: model.to_string(),
             tokens_in: 0,
@@ -58,6 +67,7 @@ impl App {
             auto_scroll: Cell::new(true),
             total_lines: Cell::new(0),
             view_height: Cell::new(24),
+            scrollbar_state: Cell::new(ScrollbarState::default()),
         }
     }
 
@@ -112,6 +122,19 @@ impl App {
         self.last_assistant_idx = idx;
     }
 
+    pub fn take_input(&mut self) -> String {
+        let text = self.input.lines().join("\n").trim().to_string();
+        self.input = TextArea::default();
+        self.input.set_block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
+        self.input.set_style(Style::default().fg(Color::White));
+        self.input.set_cursor_line_style(Style::default());
+        text
+    }
+
     fn max_scroll(&self) -> usize {
         self.total_lines
             .get()
@@ -126,33 +149,6 @@ impl App {
             KeyCode::Tab => {
                 self.show_repo_panel = !self.show_repo_panel;
             }
-            KeyCode::Char(c) if !self.streaming => {
-                self.input.insert(self.cursor, c);
-                self.cursor += 1;
-            }
-            KeyCode::Backspace if !self.streaming => {
-                if self.cursor > 0 {
-                    self.input.remove(self.cursor - 1);
-                    self.cursor -= 1;
-                }
-            }
-            KeyCode::Delete if !self.streaming => {
-                if self.cursor < self.input.len() {
-                    self.input.remove(self.cursor);
-                }
-            }
-            KeyCode::Left if !self.streaming => {
-                if self.cursor > 0 {
-                    self.cursor -= 1;
-                }
-            }
-            KeyCode::Right if !self.streaming => {
-                if self.cursor < self.input.len() {
-                    self.cursor += 1;
-                }
-            }
-            KeyCode::Home => self.cursor = 0,
-            KeyCode::End => self.cursor = self.input.len(),
             KeyCode::PageUp => {
                 let page = self.view_height.get().saturating_sub(2);
                 self.scroll_offset
@@ -181,7 +177,26 @@ impl App {
                     self.auto_scroll.set(true);
                 }
             }
-            _ => {}
+            _ => {
+                if !self.streaming {
+                    self.input.input(key);
+                }
+            }
+        }
+    }
+
+    pub fn handle_mouse_scroll(&self, direction: i16) {
+        if direction > 0 {
+            let max = self.max_scroll();
+            let new = (self.scroll_offset.get() + 3).min(max);
+            self.scroll_offset.set(new);
+            if new >= max {
+                self.auto_scroll.set(true);
+            }
+        } else {
+            self.scroll_offset
+                .set(self.scroll_offset.get().saturating_sub(3));
+            self.auto_scroll.set(false);
         }
     }
 }
@@ -231,9 +246,21 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
         String::new()
     };
     let panel_indicator = if app.show_repo_panel { " [Tab]" } else { "" };
+    let spinner = if app.streaming {
+        let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let idx = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            / 100) as usize
+            % frames.len();
+        format!(" {} ", frames[idx])
+    } else {
+        String::new()
+    };
     let text = format!(
-        " zuc1fer | {} | {}in {}out | {}{}{}",
-        app.model, app.tokens_in, app.tokens_out, app.status, scrolled, panel_indicator
+        " zuc1fer | {} | {}in {}out |{} {}{}{}",
+        app.model, app.tokens_in, app.tokens_out, spinner, app.status, scrolled, panel_indicator
     );
     frame.render_widget(
         Paragraph::new(text).style(Style::default().bg(Color::DarkGray).fg(Color::White)),
@@ -256,23 +283,17 @@ fn draw_repo_panel(frame: &mut Frame, area: Rect, app: &App) {
         )]));
     } else {
         for (path, score) in &app.repo_files {
-            let line = if *score > 0.5 {
-                Line::from(vec![Span::styled(
-                    format!(" {:.3}  {}", score, path),
-                    Style::default().fg(Color::White),
-                )])
+            let color = if *score > 0.5 {
+                Color::White
             } else if *score > 0.1 {
-                Line::from(vec![Span::styled(
-                    format!(" {:.3}  {}", score, path),
-                    Style::default().fg(Color::Gray),
-                )])
+                Color::Gray
             } else {
-                Line::from(vec![Span::styled(
-                    format!(" {:.3}  {}", score, path),
-                    Style::default().fg(Color::DarkGray),
-                )])
+                Color::DarkGray
             };
-            lines.push(line);
+            lines.push(Line::from(vec![Span::styled(
+                format!(" {:.3}  {}", score, path),
+                Style::default().fg(color),
+            )]));
         }
     }
 
@@ -285,10 +306,10 @@ fn draw_repo_panel(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
-    let width = area.width as usize;
+    let msg_width = area.width.saturating_sub(2) as usize;
     let max_lines = area.height as usize;
 
-    let all_lines = build_message_lines(&app.messages, width);
+    let all_lines = build_message_lines(&app.messages, msg_width);
     let total = all_lines.len();
     app.total_lines.set(total);
 
@@ -314,6 +335,28 @@ fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     frame.render_widget(Paragraph::new(lines), area);
+
+    if total > max_lines {
+        let mut state = ScrollbarState::default()
+            .content_length(total)
+            .viewport_content_length(max_lines)
+            .position(effective_scroll);
+
+        let scrollbar_area = Rect {
+            x: area.x + area.width.saturating_sub(1),
+            y: area.y,
+            width: 1,
+            height: area.height,
+        };
+        frame.render_stateful_widget(
+            Scrollbar::default()
+                .orientation(ScrollbarOrientation::VerticalRight)
+                .style(Style::default().fg(Color::DarkGray)),
+            scrollbar_area,
+            &mut state,
+        );
+        app.scrollbar_state.set(state);
+    }
 }
 
 fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> Vec<Line<'static>> {
@@ -396,25 +439,20 @@ fn wrap_line(line: &str, width: usize, result: &mut Vec<String>) {
 }
 
 fn draw_input(frame: &mut Frame, area: Rect, app: &App) {
-    let indicator = if app.streaming { "~" } else { ">" };
-    let text = format!("{} {}", indicator, app.input);
-
-    frame.render_widget(
-        Paragraph::new(text)
-            .block(
-                Block::default()
-                    .borders(Borders::TOP)
-                    .border_style(Style::default().fg(Color::DarkGray)),
-            )
-            .style(if app.streaming {
-                Style::default().fg(Color::DarkGray)
-            } else {
-                Style::default().fg(Color::White)
-            }),
-        area,
+    let mut input = app.input.clone();
+    input.set_style(if app.streaming {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::White)
+    });
+    input.set_block(
+        Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(Color::DarkGray)),
     );
+    frame.render_widget(&input, area);
 
     if !app.streaming {
-        frame.set_cursor_position((area.x + app.cursor as u16 + 2, area.y + 1));
+        frame.set_cursor_position((area.x + app.input.cursor().0 as u16 + 1, area.y));
     }
 }
