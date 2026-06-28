@@ -11,7 +11,22 @@ use ratatui::{
 };
 use std::cell::Cell;
 use std::collections::VecDeque;
+use std::sync::OnceLock;
 use tui_textarea::TextArea;
+
+static SYNTAX_SET: OnceLock<syntect::parsing::SyntaxSet> = OnceLock::new();
+static THEME: OnceLock<syntect::highlighting::Theme> = OnceLock::new();
+
+fn get_syntax_set() -> &'static syntect::parsing::SyntaxSet {
+    SYNTAX_SET.get_or_init(|| syntect::parsing::SyntaxSet::load_defaults_newlines())
+}
+
+fn get_theme() -> &'static syntect::highlighting::Theme {
+    THEME.get_or_init(|| {
+        let ts = syntect::highlighting::ThemeSet::load_defaults();
+        ts.themes["base16-ocean.dark"].clone()
+    })
+}
 
 pub struct App {
     pub messages: VecDeque<Message>,
@@ -1225,23 +1240,43 @@ fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> Vec<Line<'
             }
             MessageRole::Assistant => {
                 let mut in_code_block = false;
+                let mut code_lang = String::new();
+                let mut code_buffer: Vec<String> = Vec::new();
                 for text_line in msg.text.lines() {
-                    if text_line.trim().starts_with("```") {
-                        in_code_block = !in_code_block;
-                        lines.push(Line::from(vec![Span::styled(
-                            text_line.to_string(),
-                            Style::default().fg(Color::DarkGray),
-                        )]));
-                        continue;
-                    }
-                    if in_code_block {
-                        let wrapped = wrap_text(text_line, width.saturating_sub(2));
-                        for w in wrapped {
+                    let trimmed = text_line.trim();
+                    if trimmed.starts_with("```") {
+                        if in_code_block {
+                            if !code_buffer.is_empty() {
+                                let highlighted = highlight_code(&code_buffer, &code_lang);
+                                for h in highlighted {
+                                    let wrapped = wrap_text(&h, width.saturating_sub(2));
+                                    for w in wrapped {
+                                        lines.push(Line::from(vec![Span::styled(
+                                            format!("  {w}"),
+                                            Style::default().fg(Color::DarkGray),
+                                        )]));
+                                    }
+                                }
+                            }
+                            code_buffer.clear();
+                            in_code_block = false;
                             lines.push(Line::from(vec![Span::styled(
-                                format!("  {w}"),
+                                text_line.to_string(),
+                                Style::default().fg(Color::DarkGray),
+                            )]));
+                        } else {
+                            in_code_block = true;
+                            code_lang =
+                                trimmed.strip_prefix("```").unwrap_or("").trim().to_string();
+                            lines.push(Line::from(vec![Span::styled(
+                                text_line.to_string(),
                                 Style::default().fg(Color::DarkGray),
                             )]));
                         }
+                        continue;
+                    }
+                    if in_code_block {
+                        code_buffer.push(text_line.to_string());
                         continue;
                     }
                     let rendered = render_markdown_line(text_line);
@@ -1489,4 +1524,29 @@ fn model_context_limit(model: &str) -> u64 {
         "ollama" => 4_096,
         _ => 131_072,
     }
+}
+
+fn highlight_code(lines: &[String], language: &str) -> Vec<String> {
+    let ss = get_syntax_set();
+    let syntax = ss
+        .find_syntax_by_token(language)
+        .or_else(|| ss.find_syntax_by_extension(language))
+        .unwrap_or_else(|| ss.find_syntax_plain_text());
+
+    let theme = get_theme();
+    let mut highlighter = syntect::easy::HighlightLines::new(syntax, theme);
+    let mut result = Vec::new();
+
+    for line in lines {
+        if let Ok(ranges) = highlighter.highlight_line(line, ss) {
+            let styled: String = ranges
+                .iter()
+                .map(|(_style, text)| text.to_string())
+                .collect();
+            result.push(styled);
+        } else {
+            result.push(line.clone());
+        }
+    }
+    result
 }
