@@ -4,6 +4,7 @@ use crate::indexer::Indexer;
 use crate::lsp_tool::LspTool;
 use crate::mcp_bridge::McpBridge;
 use crate::mcp_tool::McpTool;
+use crate::plugin_manager;
 use crate::repomap::RepoMap;
 use crate::semantic_tool::SemanticTool;
 use crate::session::{Session, SessionMessage};
@@ -165,6 +166,12 @@ impl Agent {
 
             tool_registry.register(Arc::new(SemanticTool::new(ci.clone())));
             tool_registry.register(Arc::new(LspTool::new(working_dir.clone())));
+
+            let plugins = plugin_manager::discover_plugins(&mut tool_registry)?;
+            if !plugins.is_empty() {
+                tracing::info!("Loaded {} plugin(s): {}", plugins.len(), plugins.join(", "));
+            }
+
             Some(ci)
         };
 

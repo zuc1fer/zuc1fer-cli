@@ -6,6 +6,8 @@ pub mod lsp_client;
 pub mod lsp_tool;
 pub mod mcp_bridge;
 pub mod mcp_tool;
+pub mod plugin_manager;
+pub mod plugin_tool;
 pub mod repomap;
 pub mod semantic_tool;
 pub mod session;
