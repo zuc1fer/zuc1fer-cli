@@ -3,7 +3,9 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{
+        Block, Borders, Gauge, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs,
+    },
     Frame,
 };
 use std::cell::Cell;
@@ -22,6 +24,9 @@ pub struct App {
     pub streaming: bool,
     pub repo_files: Vec<(String, f64)>,
     pub show_repo_panel: bool,
+    pub sidebar_tab: usize,
+    pub mcp_servers: Vec<(String, bool)>,
+    pub cost_usd: f64,
     last_assistant_idx: usize,
     scroll_offset: Cell<usize>,
     auto_scroll: Cell<bool>,
@@ -64,6 +69,9 @@ impl App {
             streaming: false,
             repo_files: Vec::new(),
             show_repo_panel: false,
+            sidebar_tab: 0,
+            mcp_servers: Vec::new(),
+            cost_usd: 0.0,
             last_assistant_idx: 0,
             scroll_offset: Cell::new(0),
             auto_scroll: Cell::new(true),
@@ -137,6 +145,14 @@ impl App {
         text
     }
 
+    pub fn update_cost(&mut self) {
+        let provider = self.model.split('/').next().unwrap_or("unknown");
+        let (price_in, price_out) = model_pricing(provider);
+        let in_cost = (self.tokens_in as f64 / 1_000_000.0) * price_in;
+        let out_cost = (self.tokens_out as f64 / 1_000_000.0) * price_out;
+        self.cost_usd = in_cost + out_cost;
+    }
+
     fn max_scroll(&self) -> usize {
         self.total_lines
             .get()
@@ -149,7 +165,14 @@ impl App {
                 self.running = false;
             }
             KeyCode::Tab => {
-                self.show_repo_panel = !self.show_repo_panel;
+                if self.show_repo_panel {
+                    self.sidebar_tab = (self.sidebar_tab + 1) % 3;
+                } else {
+                    self.show_repo_panel = true;
+                }
+            }
+            KeyCode::Esc => {
+                self.show_repo_panel = false;
             }
             KeyCode::PageUp => {
                 let page = self.view_height.get().saturating_sub(2);
@@ -245,7 +268,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
         app.view_height.set(h_chunks[0].height as usize);
         draw_messages(frame, h_chunks[0], app);
-        draw_repo_panel(frame, h_chunks[1], app);
+        draw_sidebar(frame, h_chunks[1], app);
     } else {
         app.view_height.set(msg_area.height as usize);
         draw_messages(frame, msg_area, app);
@@ -271,7 +294,12 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         String::new()
     };
-    let panel_indicator = if app.show_repo_panel { " [Tab]" } else { "" };
+    let panel_indicator = if app.show_repo_panel {
+        let tab_names = ["RepoMap", "Session", "MCPs"];
+        format!(" [Tab:{}]", tab_names[app.sidebar_tab.min(2)])
+    } else {
+        String::new()
+    };
     let spinner = if app.streaming {
         let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let idx = (std::time::SystemTime::now()
@@ -317,14 +345,36 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(gauge, header_rows[1]);
 }
 
-fn draw_repo_panel(frame: &mut Frame, area: Rect, app: &App) {
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(vec![Span::styled(
-        " Repository Map ",
-        Style::default().fg(Color::Cyan),
-    )]));
-    lines.push(Line::from(""));
+fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App) {
+    let tab_titles = vec![" RepoMap ", " Session ", " MCPs "];
+    let tabs = Tabs::new(tab_titles)
+        .block(
+            Block::default()
+                .borders(Borders::LEFT | Borders::BOTTOM)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        )
+        .select(app.sidebar_tab)
+        .highlight_style(Style::default().fg(Color::Cyan))
+        .divider("|");
 
+    let tab_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(0)])
+        .split(area);
+
+    frame.render_widget(tabs, tab_rows[0]);
+
+    let content_area = tab_rows[1];
+    match app.sidebar_tab {
+        0 => draw_repo_tab(frame, content_area, app),
+        1 => draw_session_tab(frame, content_area, app),
+        2 => draw_mcp_tab(frame, content_area, app),
+        _ => {}
+    }
+}
+
+fn draw_repo_tab(frame: &mut Frame, area: Rect, app: &App) {
+    let mut lines: Vec<Line> = Vec::new();
     if app.repo_files.is_empty() {
         lines.push(Line::from(vec![Span::styled(
             " (no data yet)",
@@ -345,13 +395,104 @@ fn draw_repo_panel(frame: &mut Frame, area: Rect, app: &App) {
             )]));
         }
     }
+    frame.render_widget(Paragraph::new(lines), area);
+}
 
-    let panel = Paragraph::new(lines).block(
-        Block::default()
-            .borders(Borders::LEFT)
-            .border_style(Style::default().fg(Color::DarkGray)),
+fn draw_session_tab(frame: &mut Frame, area: Rect, app: &App) {
+    let total = app.tokens_in + app.tokens_out;
+    let context_pct = if app.context_max_tokens > 0 {
+        (total as f64 / app.context_max_tokens as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    let lines = vec![
+        Line::from(vec![Span::styled(
+            " Session",
+            Style::default().fg(Color::Cyan),
+        )]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            format!(" Model: {}", app.model),
+            Style::default().fg(Color::White),
+        )]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            format!(" Tokens in:  {}", app.tokens_in),
+            Style::default().fg(Color::Gray),
+        )]),
+        Line::from(vec![Span::styled(
+            format!(" Tokens out: {}", app.tokens_out),
+            Style::default().fg(Color::Gray),
+        )]),
+        Line::from(vec![Span::styled(
+            format!(" Total:      {} ({:.0}%)", total, context_pct),
+            Style::default().fg(Color::White),
+        )]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            format!(" Est. cost:  ${:.4}", app.cost_usd),
+            Style::default().fg(Color::Yellow),
+        )]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " Msgs: 0",
+            Style::default().fg(Color::DarkGray),
+        )]),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::LEFT)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        ),
+        area,
     );
-    frame.render_widget(panel, area);
+}
+
+fn draw_mcp_tab(frame: &mut Frame, area: Rect, app: &App) {
+    let mut lines = vec![
+        Line::from(vec![Span::styled(
+            " MCP Servers",
+            Style::default().fg(Color::Cyan),
+        )]),
+        Line::from(""),
+    ];
+
+    if app.mcp_servers.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            " No MCP servers configured",
+            Style::default().fg(Color::DarkGray),
+        )]));
+    } else {
+        for (name, connected) in &app.mcp_servers {
+            let (icon, color) = if *connected {
+                (" ●", Color::Green)
+            } else {
+                (" ○", Color::Red)
+            };
+            lines.push(Line::from(vec![
+                Span::styled(icon, Style::default().fg(color)),
+                Span::styled(format!(" {name}"), Style::default().fg(Color::White)),
+            ]));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![Span::styled(
+        " Configure in config.toml",
+        Style::default().fg(Color::DarkGray),
+    )]));
+
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::LEFT)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        ),
+        area,
+    );
 }
 
 fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
@@ -503,5 +644,16 @@ fn draw_input(frame: &mut Frame, area: Rect, app: &App) {
 
     if !app.streaming {
         frame.set_cursor_position((area.x + app.input.cursor().0 as u16 + 1, area.y));
+    }
+}
+
+fn model_pricing(provider: &str) -> (f64, f64) {
+    match provider {
+        "deepseek" => (0.55, 2.19),
+        "anthropic" => (3.0, 15.0),
+        "openai" => (2.50, 10.0),
+        "openrouter" => (0.50, 1.50),
+        "ollama" => (0.0, 0.0),
+        _ => (1.0, 5.0),
     }
 }
