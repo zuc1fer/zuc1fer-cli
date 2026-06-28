@@ -245,6 +245,13 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                     if key.kind != crossterm::event::KeyEventKind::Press {
                         continue;
                     }
+                    if key.code == crossterm::event::KeyCode::Enter
+                        && key.modifiers.contains(crossterm::event::KeyModifiers::ALT)
+                        && !app.streaming
+                    {
+                        app.handle_key(key);
+                        continue;
+                    }
                     if key.code == crossterm::event::KeyCode::Enter && !app.streaming {
                         if app.palette_open || app.show_model_picker || app.show_session_picker {
                             if let Some(cmd) = app.handle_key(key) {

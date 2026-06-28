@@ -271,6 +271,6 @@ impl LlmProvider for OpenRouterProvider {
     }
 
     fn estimate_tokens(&self, text: &str) -> u64 {
-        (text.len() as u64 * 2) / 3
+        (text.len() as u64 + 2) / 3
     }
 }

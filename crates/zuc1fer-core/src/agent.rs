@@ -328,7 +328,8 @@ impl Agent {
         provider: &Arc<dyn zuc1fer_llm::LlmProvider>,
         model_name: &str,
     ) {
-        let token_limit: u64 = 90_000;
+        let context_limit: u64 = model_context_for_compaction(model_name);
+        let token_limit: u64 = (context_limit * 70) / 100;
         let mut total_tokens: u64 = 0;
         for msg in &session.messages {
             total_tokens += provider.estimate_tokens(&msg.content);
@@ -769,4 +770,14 @@ pub struct AgentResponse {
     pub text: String,
     pub tool_calls: Vec<ToolCall>,
     pub usage: Option<zuc1fer_llm::Usage>,
+}
+
+fn model_context_for_compaction(model: &str) -> u64 {
+    let lower = model.to_lowercase();
+    if lower.contains("v4") { 1_048_576 }
+    else if lower.contains("sonnet") || lower.contains("opus") || lower.contains("fable") { 1_048_576 }
+    else if lower.contains("haiku") { 200_000 }
+    else if lower.contains("gpt-5") || lower.contains("gpt-4") { 1_048_576 }
+    else if lower.contains("mini") || lower.contains("nano") { 400_000 }
+    else { 131_072 }
 }
