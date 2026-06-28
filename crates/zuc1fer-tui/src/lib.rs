@@ -6,6 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
+use std::cell::Cell;
 use std::collections::VecDeque;
 
 pub struct App {
@@ -20,6 +21,7 @@ pub struct App {
     pub running: bool,
     pub streaming: bool,
     pub stream_buffer: String,
+    pub view_height: Cell<usize>,
 }
 
 pub enum ChatLine {
@@ -43,6 +45,7 @@ impl App {
             running: true,
             streaming: false,
             stream_buffer: String::new(),
+            view_height: Cell::new(24),
         }
     }
 
@@ -51,6 +54,18 @@ impl App {
         if self.messages.len() > 500 {
             self.messages.pop_front();
         }
+        if !self.streaming {
+            self.scroll = 0;
+        }
+    }
+
+    fn scroll_step(&self) -> usize {
+        (self.view_height.get() / 2).max(1)
+    }
+
+    fn max_scroll(&self) -> usize {
+        let total = self.messages.len();
+        total.saturating_sub(self.view_height.get().saturating_sub(2))
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
@@ -85,11 +100,13 @@ impl App {
             }
             KeyCode::Home => self.cursor = 0,
             KeyCode::End => self.cursor = self.input.len(),
-            KeyCode::PageUp => {
-                self.scroll = self.scroll.saturating_add(3);
+            KeyCode::PageUp | KeyCode::Up => {
+                let step = self.scroll_step();
+                self.scroll = (self.scroll + step).min(self.max_scroll());
             }
-            KeyCode::PageDown => {
-                self.scroll = self.scroll.saturating_sub(3);
+            KeyCode::PageDown | KeyCode::Down => {
+                let step = self.scroll_step();
+                self.scroll = self.scroll.saturating_sub(step);
             }
             _ => {}
         }
@@ -106,16 +123,23 @@ pub fn draw(frame: &mut Frame, app: &App) {
         ])
         .split(frame.area());
 
+    app.view_height.set(chunks[1].height as usize);
+
     draw_header(frame, chunks[0], app);
     draw_messages(frame, chunks[1], app);
     draw_input(frame, chunks[2], app);
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
+    let scrolled = if app.scroll > 0 {
+        format!(" [scrolled {}]", app.scroll)
+    } else {
+        String::new()
+    };
     let header = Span::styled(
         format!(
-            " zuc1fer | {} | in:{} out:{} | {}",
-            app.model, app.tokens_in, app.tokens_out, app.status
+            " zuc1fer | {} | in:{} out:{} | {}{}",
+            app.model, app.tokens_in, app.tokens_out, app.status, scrolled
         ),
         Style::default()
             .fg(Color::Black)
@@ -159,13 +183,13 @@ fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
             }
             ChatLine::Status(text) => {
                 lines.push(Line::from(vec![Span::styled(
-                    format!("  ─ {text}"),
+                    format!("  - {text}"),
                     Style::default().fg(Color::DarkGray),
                 )]));
             }
             ChatLine::Error(text) => {
                 lines.push(Line::from(vec![Span::styled(
-                    format!("  ✗ {text}"),
+                    format!("  x {text}"),
                     Style::default().fg(Color::Red),
                 )]));
             }
@@ -182,12 +206,12 @@ fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    let paragraph = Paragraph::new(lines).scroll((0, 0));
+    let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, area);
 }
 
 fn draw_input(frame: &mut Frame, area: Rect, app: &App) {
-    let indicator = if app.streaming { "⏳" } else { ">" };
+    let indicator = if app.streaming { "~" } else { ">" };
     let prompt = format!("{indicator} {}", app.input);
 
     let block = Block::default()
