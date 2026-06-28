@@ -8,7 +8,7 @@ impl Tool for WriteTool {
     fn definition(&self) -> ToolDef {
         ToolDef {
             name: "write".into(),
-            description: "Create a new file or completely overwrite an existing file. Use with caution — this overwrites without warning.".into(),
+            description: "Create a new file or completely overwrite an existing file. For code with hex escapes, backslashes, or complex quotes, use content_b64 parameter to avoid JSON corruption.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -19,9 +19,13 @@ impl Tool for WriteTool {
                     "content": {
                         "type": "string",
                         "description": "Content to write to the file"
+                    },
+                    "content_b64": {
+                        "type": "string",
+                        "description": "Base64-encoded content. Use this instead of 'content' when the file contains \\x, 0x, backslashes, or complex quotes to avoid JSON pipeline corruption."
                     }
                 },
-                "required": ["filePath", "content"]
+                "required": ["filePath"]
             }),
         }
     }
@@ -56,7 +60,19 @@ impl Tool for WriteTool {
             }
         }
 
-        let content = call.arguments["content"].as_str().unwrap_or("");
+        let mut content = call.arguments["content"].as_str().unwrap_or("").to_string();
+        if let Some(b64) = call.arguments["content_b64"].as_str() {
+            if !b64.is_empty() {
+                use base64::Engine;
+                match base64::engine::general_purpose::STANDARD.decode(b64) {
+                    Ok(decoded) => content = String::from_utf8_lossy(&decoded).to_string(),
+                    Err(e) => return Ok(ToolResult::error(&call.id, format!("Base64 decode failed: {e}"))),
+                }
+            }
+        }
+        if content.is_empty() {
+            return Ok(ToolResult::error(&call.id, "No content or content_b64 provided"));
+        }
 
         if let Some(parent) = path.parent() {
             if !parent.exists() {
@@ -65,11 +81,11 @@ impl Tool for WriteTool {
         }
 
         let existed = path.exists();
-        std::fs::write(&path, content)?;
+        std::fs::write(&path, &content)?;
 
         let verify = std::fs::read_to_string(&path).unwrap_or_default();
         if verify != content {
-            let diff = diff_strings(content, &verify);
+            let diff = diff_strings(&content, &verify);
             return Ok(ToolResult::error(
                 &call.id,
                 format!(
