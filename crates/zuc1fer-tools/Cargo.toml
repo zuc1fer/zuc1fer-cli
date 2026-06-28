@@ -16,6 +16,8 @@ regex.workspace = true
 futures.workspace = true
 git2 = "0.20"
 chrono.workspace = true
+reqwest.workspace = true
+html2text = "0.6"
 
 [dev-dependencies]
 tempfile = "3"

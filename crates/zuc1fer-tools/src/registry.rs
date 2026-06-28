@@ -1,4 +1,4 @@
-use crate::{ast_grep::AstGrepTool, bash::BashTool, edit::EditTool, git::GitTool, glob::GlobTool, grep::GrepTool, read::ReadTool, write::WriteTool};
+use crate::{ast_grep::AstGrepTool, bash::BashTool, edit::EditTool, git::GitTool, glob::GlobTool, grep::GrepTool, read::ReadTool, webfetch::WebFetch, websearch::WebSearch, write::WriteTool};
 use crate::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,6 +25,8 @@ impl ToolRegistry {
         self.register(Arc::new(GrepTool));
         self.register(Arc::new(AstGrepTool));
         self.register(Arc::new(GitTool));
+        self.register(Arc::new(WebFetch));
+        self.register(Arc::new(WebSearch));
     }
 
     pub fn register(&mut self, tool: Arc<dyn Tool>) {
