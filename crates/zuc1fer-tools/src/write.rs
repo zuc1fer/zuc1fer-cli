@@ -36,6 +36,18 @@ impl Tool for WriteTool {
             path
         };
 
+        if ctx.safe_mode {
+            let canonical_workspace = ctx.working_dir.canonicalize().unwrap_or_else(|_| ctx.working_dir.clone());
+            if let Ok(canonical_target) = path.canonicalize() {
+                if !canonical_target.starts_with(&canonical_workspace) {
+                    return Ok(ToolResult::error(
+                        &call.id,
+                        format!("Safe mode: blocked write outside workspace: {}", path.display()),
+                    ));
+                }
+            }
+        }
+
         let content = call.arguments["content"].as_str().unwrap_or("");
 
         if let Some(parent) = path.parent() {

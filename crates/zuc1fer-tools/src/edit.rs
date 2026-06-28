@@ -103,6 +103,7 @@ mod tests {
     fn ctx() -> ToolContext {
         ToolContext {
             working_dir: std::env::temp_dir(),
+            safe_mode: false,
         }
     }
 

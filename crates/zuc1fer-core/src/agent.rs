@@ -426,6 +426,7 @@ impl Agent {
 
             let ctx = ToolContext {
                 working_dir: self.working_dir.clone(),
+                safe_mode: self.config.safe_mode,
             };
 
             self.emitln_debug(&format!("Running {} tool(s)...\n", tool_calls.len()));

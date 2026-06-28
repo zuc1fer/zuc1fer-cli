@@ -66,6 +66,7 @@ impl ToolResult {
 #[derive(Debug, Clone)]
 pub struct ToolContext {
     pub working_dir: std::path::PathBuf,
+    pub safe_mode: bool,
 }
 
 #[async_trait::async_trait]

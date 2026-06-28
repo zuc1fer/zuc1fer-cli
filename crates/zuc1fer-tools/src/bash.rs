@@ -41,6 +41,23 @@ impl Tool for BashTool {
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| ctx.working_dir.clone());
 
+        if ctx.safe_mode {
+            let lower = cmd.to_lowercase();
+            let dangerous = [
+                "rm ", "del ", "rmdir ", "sudo ", "chmod ", "chown ",
+                "dd ", "mkfs", "shutdown", "reboot", "halt",
+                "format ", "fdisk", "diskpart",
+            ];
+            for pattern in &dangerous {
+                if lower.contains(pattern) {
+                    return Ok(ToolResult::error(
+                        &call.id,
+                        format!("Safe mode: blocked potentially destructive command matching '{pattern}'. Use --safe=false to disable."),
+                    ));
+                }
+            }
+        }
+
         tracing::debug!("bash: {}", cmd);
 
         let mut child = if cfg!(windows) {

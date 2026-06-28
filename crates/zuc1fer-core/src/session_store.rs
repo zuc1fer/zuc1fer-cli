@@ -104,7 +104,7 @@ impl SessionStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, model, working_dir, total_tokens, created_at, updated_at,
-                    length(messages_json) - length(replace(messages_json, '\"role\"', '')) as msg_count
+                    json_array_length(messages_json) as msg_count
              FROM sessions ORDER BY updated_at DESC LIMIT 50",
         )?;
 
@@ -116,7 +116,7 @@ impl SessionStore {
                 total_tokens: row.get(3)?,
                 created_at: row.get(4)?,
                 updated_at: row.get(5)?,
-                message_count: (row.get::<_, usize>(6)? / 5).min(999),
+                message_count: row.get::<_, usize>(6)?.min(999),
             })
         })?;
 
