@@ -124,9 +124,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
             let text_tx_clone = text_tx.clone();
             let done_tx_clone = done_tx.clone();
 
-            app.streaming = true;
-            app.stream_buffer.clear();
-            app.scroll = 0;
+            app.start_streaming();
 
             rt.spawn(async move {
                 let mut s = session_clone.lock().await;
@@ -158,7 +156,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                     app.add_message(ChatLine::Error(err.to_string()));
                 }
             } else if app.streaming {
-                app.stream_buffer.push_str(&text);
+                app.append_stream(&text);
             } else {
                 app.add_message(ChatLine::Assistant(text));
             }
@@ -169,11 +167,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
             }
         }
         while let Ok(_) = done_rx.try_recv() {
-            if app.streaming && !app.stream_buffer.is_empty() {
-                let buf = std::mem::take(&mut app.stream_buffer);
-                app.add_message(ChatLine::Assistant(buf));
-            }
-            app.streaming = false;
+            app.end_streaming();
             app.status = "Ready".into();
         }
 

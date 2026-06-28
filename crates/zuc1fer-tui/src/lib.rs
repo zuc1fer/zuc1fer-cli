@@ -20,8 +20,8 @@ pub struct App {
     pub scroll: usize,
     pub running: bool,
     pub streaming: bool,
-    pub stream_buffer: String,
     pub view_height: Cell<usize>,
+    last_assistant_idx: usize,
 }
 
 pub enum ChatLine {
@@ -44,8 +44,8 @@ impl App {
             scroll: 0,
             running: true,
             streaming: false,
-            stream_buffer: String::new(),
             view_height: Cell::new(24),
+            last_assistant_idx: 0,
         }
     }
 
@@ -57,6 +57,25 @@ impl App {
         if !self.streaming {
             self.scroll = 0;
         }
+    }
+
+    pub fn start_streaming(&mut self) {
+        let idx = self.messages.len();
+        self.messages.push_back(ChatLine::Assistant(String::new()));
+        self.last_assistant_idx = idx;
+        self.streaming = true;
+        self.scroll = 0;
+    }
+
+    pub fn append_stream(&mut self, text: &str) {
+        if let Some(ChatLine::Assistant(ref mut content)) = self.messages.get_mut(self.last_assistant_idx) {
+            content.push_str(text);
+        }
+    }
+
+    pub fn end_streaming(&mut self) {
+        self.streaming = false;
+        self.scroll = 0;
     }
 
     fn scroll_step(&self) -> usize {
@@ -195,15 +214,6 @@ fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
             }
         }
         lines.push(Line::from(""));
-    }
-
-    if app.streaming && !app.stream_buffer.is_empty() {
-        for line in app.stream_buffer.lines() {
-            lines.push(Line::from(vec![Span::styled(
-                line,
-                Style::default().fg(Color::Green),
-            )]));
-        }
     }
 
     let paragraph = Paragraph::new(lines);
