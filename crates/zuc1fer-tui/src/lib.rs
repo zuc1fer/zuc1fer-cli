@@ -1277,9 +1277,9 @@ fn draw_input(frame: &mut Frame, area: Rect, app: &App) {
 
 fn model_pricing(provider: &str) -> (f64, f64) {
     match provider {
-        "deepseek" => (0.55, 2.19),
+        "deepseek" => (0.435, 0.87),
         "anthropic" => (3.0, 15.0),
-        "openai" => (2.50, 10.0),
+        "openai" => (2.50, 15.0),
         "openrouter" => (0.50, 1.50),
         "ollama" => (0.0, 0.0),
         _ => (1.0, 5.0),
@@ -1292,19 +1292,25 @@ fn model_context_limit(model: &str) -> u64 {
     match provider {
         "deepseek" => {
             if model_lower.contains("v4") {
-                262_144
+                1_048_576
             } else {
                 131_072
             }
         }
         "anthropic" => {
-            if model_lower.contains("opus") {
+            if model_lower.contains("haiku") {
                 200_000
             } else {
-                200_000
+                1_048_576
             }
         }
-        "openai" => 131_072,
+        "openai" => {
+            if model_lower.contains("mini") || model_lower.contains("nano") {
+                400_000
+            } else {
+                1_048_576
+            }
+        }
         "openrouter" => 131_072,
         "ollama" => 4_096,
         _ => 131_072,
