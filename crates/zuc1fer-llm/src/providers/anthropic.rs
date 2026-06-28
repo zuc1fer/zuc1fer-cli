@@ -275,6 +275,6 @@ impl LlmProvider for AnthropicProvider {
     }
 
     fn estimate_tokens(&self, text: &str) -> u64 {
-        (text.len() as u64 * 3) / 4
+        (text.len() as u64 + 2) / 3
     }
 }

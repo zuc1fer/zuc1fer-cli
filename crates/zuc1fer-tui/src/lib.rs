@@ -40,6 +40,9 @@ pub struct App {
     pub show_session_picker: bool,
     pub session_picker_selection: usize,
     pub todos: Vec<TodoItem>,
+    pub input_history: Vec<String>,
+    history_index: Option<usize>,
+    saved_input: Option<String>,
     last_assistant_idx: usize,
     scroll_offset: Cell<usize>,
     auto_scroll: Cell<bool>,
@@ -111,6 +114,9 @@ impl App {
             show_session_picker: false,
             session_picker_selection: 0,
             todos: Vec::new(),
+            input_history: Vec::new(),
+            history_index: None,
+            saved_input: None,
             last_assistant_idx: 0,
             scroll_offset: Cell::new(0),
             auto_scroll: Cell::new(true),
@@ -216,6 +222,11 @@ impl App {
 
     pub fn take_input(&mut self) -> String {
         let text = self.input.lines().join("\n").trim().to_string();
+        if !text.is_empty() && self.input_history.last().map(|s| s.as_str()) != Some(&text) {
+            self.input_history.push(text.clone());
+        }
+        self.history_index = None;
+        self.saved_input = None;
         self.input = TextArea::default();
         self.input.set_block(
             Block::default()
@@ -225,6 +236,47 @@ impl App {
         self.input.set_style(Style::default().fg(Color::White));
         self.input.set_cursor_line_style(Style::default());
         text
+    }
+
+    fn navigate_history_back(&mut self) {
+        if self.input_history.is_empty() {
+            return;
+        }
+        if self.history_index.is_none() {
+            self.saved_input = Some(self.input.lines().join("\n"));
+            self.history_index = Some(self.input_history.len() - 1);
+        } else if let Some(idx) = self.history_index {
+            if idx > 0 {
+                self.history_index = Some(idx - 1);
+            }
+        }
+        if let Some(idx) = self.history_index {
+            if let Some(entry) = self.input_history.get(idx) {
+                self.input = TextArea::from([entry.clone()]);
+                self.input.set_style(Style::default().fg(Color::White));
+                self.input.set_cursor_line_style(Style::default());
+            }
+        }
+    }
+
+    fn navigate_history_forward(&mut self) {
+        if let Some(idx) = self.history_index {
+            if idx + 1 < self.input_history.len() {
+                self.history_index = Some(idx + 1);
+                if let Some(entry) = self.input_history.get(idx + 1) {
+                    self.input = TextArea::from([entry.clone()]);
+                    self.input.move_cursor(tui_textarea::CursorMove::End);
+                    self.input.set_style(Style::default().fg(Color::White));
+                    self.input.set_cursor_line_style(Style::default());
+                }
+            } else {
+                self.history_index = None;
+                let saved = self.saved_input.take().unwrap_or_default();
+                self.input = TextArea::from([saved]);
+                self.input.set_style(Style::default().fg(Color::White));
+                self.input.set_cursor_line_style(Style::default());
+            }
+        }
     }
 
     pub fn update_cost(&mut self) {
@@ -401,9 +453,15 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.messages.clear();
+                self.add_system_message("Screen cleared.".into());
+            }
             KeyCode::Up => {
                 if self.show_repo_panel && self.sidebar_tab == 0 {
                     self.repo_scroll = self.repo_scroll.saturating_sub(1);
+                } else if self.input.lines().len() <= 1 && self.input.cursor().1 == 0 {
+                    self.navigate_history_back();
                 } else {
                     self.scroll_offset
                         .set(self.scroll_offset.get().saturating_sub(1));
@@ -413,6 +471,8 @@ impl App {
             KeyCode::Down => {
                 if self.show_repo_panel && self.sidebar_tab == 0 {
                     self.repo_scroll += 1;
+                } else if self.history_index.is_some() {
+                    self.navigate_history_forward();
                 } else {
                     let max = self.max_scroll();
                     let new = (self.scroll_offset.get() + 1).min(max);
@@ -1198,10 +1258,16 @@ fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> Vec<Line<'
                 }
             }
             MessageRole::System => {
+                let is_error = msg.text.contains("Error") || msg.text.contains("error");
+                let color = if is_error {
+                    Color::Red
+                } else {
+                    Color::DarkGray
+                };
                 for w in wrap_text(&format!("  {}", msg.text), width) {
                     lines.push(Line::from(vec![Span::styled(
                         w,
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(color),
                     )]));
                 }
             }
