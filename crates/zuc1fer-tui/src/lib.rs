@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{Block, Borders, Gauge, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
 use std::cell::Cell;
@@ -17,6 +17,7 @@ pub struct App {
     pub model: String,
     pub tokens_in: u64,
     pub tokens_out: u64,
+    pub context_max_tokens: u64,
     pub running: bool,
     pub streaming: bool,
     pub repo_files: Vec<(String, f64)>,
@@ -58,6 +59,7 @@ impl App {
             model: model.to_string(),
             tokens_in: 0,
             tokens_out: 0,
+            context_max_tokens: 131072,
             running: true,
             streaming: false,
             repo_files: Vec::new(),
@@ -207,13 +209,33 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(2),
             Constraint::Length(1),
             Constraint::Min(4),
             Constraint::Length(3),
         ])
         .split(area);
 
-    let msg_area = chunks[1];
+    draw_header(frame, chunks[0], app);
+
+    let status_text = if app.streaming {
+        " ● Streaming..."
+    } else if app.status != "Ready" {
+        &app.status
+    } else {
+        ""
+    };
+    let status_style = if app.streaming || app.status != "Ready" {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+    frame.render_widget(
+        Paragraph::new(format!(" {status_text}")).style(status_style),
+        chunks[1],
+    );
+
+    let msg_area = chunks[2];
 
     if app.show_repo_panel && msg_area.width > 40 {
         let h_chunks = Layout::default()
@@ -229,11 +251,15 @@ pub fn draw(frame: &mut Frame, app: &App) {
         draw_messages(frame, msg_area, app);
     }
 
-    draw_header(frame, chunks[0], app);
-    draw_input(frame, chunks[2], app);
+    draw_input(frame, chunks[3], app);
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
+    let header_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Length(1)])
+        .split(area);
+
     let scrolled = if !app.auto_scroll.get() {
         let offset = app.scroll_offset.get();
         let total = app.total_lines.get();
@@ -254,18 +280,41 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
             .as_millis()
             / 100) as usize
             % frames.len();
-        format!(" {} ", frames[idx])
+        format!("{}", frames[idx])
     } else {
         String::new()
     };
     let text = format!(
-        " zuc1fer | {} | {}in {}out |{} {}{}{}",
-        app.model, app.tokens_in, app.tokens_out, spinner, app.status, scrolled, panel_indicator
+        "{} zuc1fer | {} | {}in {}out | {}{}{}",
+        spinner, app.model, app.tokens_in, app.tokens_out, app.status, scrolled, panel_indicator
     );
     frame.render_widget(
         Paragraph::new(text).style(Style::default().bg(Color::DarkGray).fg(Color::White)),
-        area,
+        header_rows[0],
     );
+
+    let total_tokens = app.tokens_in + app.tokens_out;
+    let ratio = if app.context_max_tokens > 0 {
+        ((total_tokens as f64 / app.context_max_tokens as f64) * 100.0).min(100.0) as u16
+    } else {
+        0
+    };
+    let gauge_label = format!(" context {}/{} ", total_tokens, app.context_max_tokens);
+    let gauge = Gauge::default()
+        .gauge_style(
+            Style::default()
+                .fg(if ratio > 80 {
+                    Color::Red
+                } else if ratio > 50 {
+                    Color::Yellow
+                } else {
+                    Color::Green
+                })
+                .bg(Color::DarkGray),
+        )
+        .percent(ratio)
+        .label(gauge_label);
+    frame.render_widget(gauge, header_rows[1]);
 }
 
 fn draw_repo_panel(frame: &mut Frame, area: Rect, app: &App) {
