@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
@@ -10,7 +10,7 @@ use std::cell::Cell;
 use std::collections::VecDeque;
 
 pub struct App {
-    pub messages: VecDeque<ChatLine>,
+    pub messages: VecDeque<Message>,
     pub input: String,
     pub cursor: usize,
     pub status: String,
@@ -24,11 +24,15 @@ pub struct App {
     last_assistant_idx: usize,
 }
 
-pub enum ChatLine {
-    User(String),
-    Assistant(String),
-    Status(String),
-    Error(String),
+pub struct Message {
+    pub role: MessageRole,
+    pub text: String,
+}
+
+pub enum MessageRole {
+    User,
+    Assistant,
+    System,
 }
 
 impl App {
@@ -49,27 +53,41 @@ impl App {
         }
     }
 
-    pub fn add_message(&mut self, line: ChatLine) {
-        self.messages.push_back(line);
-        if self.messages.len() > 500 {
-            self.messages.pop_front();
-        }
-        if !self.streaming {
-            self.scroll = 0;
-        }
+    pub fn add_user_message(&mut self, text: String) {
+        self.messages.push_back(Message {
+            role: MessageRole::User,
+            text,
+        });
+    }
+
+    pub fn add_system_message(&mut self, text: String) {
+        self.messages.push_back(Message {
+            role: MessageRole::System,
+            text,
+        });
+    }
+
+    pub fn add_message(&mut self, text: String) {
+        self.messages.push_back(Message {
+            role: MessageRole::Assistant,
+            text,
+        });
     }
 
     pub fn start_streaming(&mut self) {
         let idx = self.messages.len();
-        self.messages.push_back(ChatLine::Assistant(String::new()));
+        self.messages.push_back(Message {
+            role: MessageRole::Assistant,
+            text: String::new(),
+        });
         self.last_assistant_idx = idx;
         self.streaming = true;
         self.scroll = 0;
     }
 
     pub fn append_stream(&mut self, text: &str) {
-        if let Some(ChatLine::Assistant(ref mut content)) = self.messages.get_mut(self.last_assistant_idx) {
-            content.push_str(text);
+        if let Some(msg) = self.messages.get_mut(self.last_assistant_idx) {
+            msg.text.push_str(text);
         }
     }
 
@@ -80,11 +98,6 @@ impl App {
 
     fn scroll_step(&self) -> usize {
         (self.view_height.get() / 2).max(1)
-    }
-
-    fn max_scroll(&self) -> usize {
-        let total = self.messages.len();
-        total.saturating_sub(self.view_height.get().saturating_sub(2))
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
@@ -120,12 +133,10 @@ impl App {
             KeyCode::Home => self.cursor = 0,
             KeyCode::End => self.cursor = self.input.len(),
             KeyCode::PageUp | KeyCode::Up => {
-                let step = self.scroll_step();
-                self.scroll = (self.scroll + step).min(self.max_scroll());
+                self.scroll = self.scroll.saturating_add(self.scroll_step());
             }
             KeyCode::PageDown | KeyCode::Down => {
-                let step = self.scroll_step();
-                self.scroll = self.scroll.saturating_sub(step);
+                self.scroll = self.scroll.saturating_sub(self.scroll_step());
             }
             _ => {}
         }
@@ -133,14 +144,16 @@ impl App {
 }
 
 pub fn draw(frame: &mut Frame, app: &App) {
+    let area = frame.area();
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
-            Constraint::Min(3),
+            Constraint::Min(4),
             Constraint::Length(3),
         ])
-        .split(frame.area());
+        .split(area);
 
     app.view_height.set(chunks[1].height as usize);
 
@@ -151,92 +164,87 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     let scrolled = if app.scroll > 0 {
-        format!(" [scrolled {}]", app.scroll)
+        format!(" [^{}]", app.scroll)
     } else {
         String::new()
     };
-    let header = Span::styled(
-        format!(
-            " zuc1fer | {} | in:{} out:{} | {}{}",
-            app.model, app.tokens_in, app.tokens_out, app.status, scrolled
-        ),
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Gray)
-            .add_modifier(Modifier::BOLD),
+    let text = format!(
+        " zuc1fer | {} | {}in {}out | {}{}",
+        app.model, app.tokens_in, app.tokens_out, app.status, scrolled
     );
-    let p = Paragraph::new(header);
-    frame.render_widget(p, area);
+    frame.render_widget(
+        Paragraph::new(text).style(Style::default().bg(Color::DarkGray).fg(Color::White)),
+        area,
+    );
 }
 
 fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
     let mut lines: Vec<Line> = Vec::new();
 
-    let visible = app
+    let max_lines = area.height.saturating_sub(2) as usize;
+
+    for msg in app
         .messages
         .iter()
         .rev()
         .skip(app.scroll)
-        .take(area.height.saturating_sub(2) as usize);
-
-    for msg in visible.rev() {
-        match msg {
-            ChatLine::User(text) => {
+        .take(max_lines)
+        .rev()
+    {
+        match msg.role {
+            MessageRole::User => {
                 lines.push(Line::from(vec![
-                    Span::styled(
-                        "> ",
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(text, Style::default().fg(Color::White)),
+                    Span::styled("> ", Style::default().fg(Color::Cyan)),
+                    Span::styled(&msg.text, Style::default().fg(Color::White)),
                 ]));
             }
-            ChatLine::Assistant(text) => {
-                for line in text.lines() {
+            MessageRole::Assistant => {
+                for text_line in msg.text.lines() {
                     lines.push(Line::from(vec![Span::styled(
-                        line,
-                        Style::default().fg(Color::Green),
+                        text_line,
+                        Style::default().fg(Color::Gray),
                     )]));
                 }
             }
-            ChatLine::Status(text) => {
-                lines.push(Line::from(vec![Span::styled(
-                    format!("  - {text}"),
-                    Style::default().fg(Color::DarkGray),
-                )]));
-            }
-            ChatLine::Error(text) => {
-                lines.push(Line::from(vec![Span::styled(
-                    format!("  x {text}"),
-                    Style::default().fg(Color::Red),
-                )]));
+            MessageRole::System => {
+                for text_line in msg.text.lines() {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("  {text_line}"),
+                        Style::default().fg(Color::DarkGray),
+                    )]));
+                }
             }
         }
-        lines.push(Line::from(""));
     }
 
-    let paragraph = Paragraph::new(lines);
-    frame.render_widget(paragraph, area);
+    if lines.len() < max_lines {
+        let blank = max_lines - lines.len();
+        for _ in 0..blank {
+            lines.push(Line::from(""));
+        }
+    }
+
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 fn draw_input(frame: &mut Frame, area: Rect, app: &App) {
     let indicator = if app.streaming { "~" } else { ">" };
-    let prompt = format!("{indicator} {}", app.input);
+    let text = format!("{} {}", indicator, app.input);
 
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .border_style(Style::default().fg(Color::DarkGray));
-
-    let style = if app.streaming {
-        Style::default().fg(Color::DarkGray)
-    } else {
-        Style::default().fg(Color::White)
-    };
-
-    let paragraph = Paragraph::new(prompt).block(block).style(style);
-
-    frame.render_widget(paragraph, area);
+    frame.render_widget(
+        Paragraph::new(text)
+            .block(
+                Block::default()
+                    .borders(Borders::TOP)
+                    .border_style(Style::default().fg(Color::DarkGray)),
+            )
+            .style(if app.streaming {
+                Style::default().fg(Color::DarkGray)
+            } else {
+                Style::default().fg(Color::White)
+            }),
+        area,
+    );
 
     if !app.streaming {
         frame.set_cursor_position((area.x + app.cursor as u16 + 2, area.y + 1));
