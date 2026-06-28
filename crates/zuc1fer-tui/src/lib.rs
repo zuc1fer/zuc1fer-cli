@@ -181,6 +181,7 @@ impl App {
         let in_cost = (self.tokens_in as f64 / 1_000_000.0) * price_in;
         let out_cost = (self.tokens_out as f64 / 1_000_000.0) * price_out;
         self.cost_usd = in_cost + out_cost;
+        self.context_max_tokens = model_context_limit(&self.model);
     }
 
     fn selected_palette_command(&self) -> String {
@@ -1282,5 +1283,30 @@ fn model_pricing(provider: &str) -> (f64, f64) {
         "openrouter" => (0.50, 1.50),
         "ollama" => (0.0, 0.0),
         _ => (1.0, 5.0),
+    }
+}
+
+fn model_context_limit(model: &str) -> u64 {
+    let provider = model.split('/').next().unwrap_or("");
+    let model_lower = model.to_lowercase();
+    match provider {
+        "deepseek" => {
+            if model_lower.contains("v4") {
+                262_144
+            } else {
+                131_072
+            }
+        }
+        "anthropic" => {
+            if model_lower.contains("opus") {
+                200_000
+            } else {
+                200_000
+            }
+        }
+        "openai" => 131_072,
+        "openrouter" => 131_072,
+        "ollama" => 4_096,
+        _ => 131_072,
     }
 }
