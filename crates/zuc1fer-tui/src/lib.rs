@@ -4,7 +4,8 @@ use ratatui::{
     style::{Color, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Gauge, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs,
+        Block, Borders, Clear, Gauge, List, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState, Tabs,
     },
     Frame,
 };
@@ -27,6 +28,9 @@ pub struct App {
     pub sidebar_tab: usize,
     pub mcp_servers: Vec<(String, bool)>,
     pub cost_usd: f64,
+    pub palette_open: bool,
+    pub palette_query: String,
+    pub palette_selection: usize,
     last_assistant_idx: usize,
     scroll_offset: Cell<usize>,
     auto_scroll: Cell<bool>,
@@ -72,6 +76,9 @@ impl App {
             sidebar_tab: 0,
             mcp_servers: Vec::new(),
             cost_usd: 0.0,
+            palette_open: false,
+            palette_query: String::new(),
+            palette_selection: 0,
             last_assistant_idx: 0,
             scroll_offset: Cell::new(0),
             auto_scroll: Cell::new(true),
@@ -159,10 +166,48 @@ impl App {
             .saturating_sub(self.view_height.get())
     }
 
-    pub fn handle_key(&mut self, key: KeyEvent) {
+    pub fn handle_key(&mut self, key: KeyEvent) -> Option<String> {
+        if self.palette_open {
+            match key.code {
+                KeyCode::Esc => {
+                    self.palette_open = false;
+                    self.palette_query.clear();
+                    self.palette_selection = 0;
+                }
+                KeyCode::Enter => {
+                    self.palette_open = false;
+                    let cmd = self.palette_query.clone();
+                    self.palette_query.clear();
+                    self.palette_selection = 0;
+                    return Some(cmd);
+                }
+                KeyCode::Up => {
+                    self.palette_selection = self.palette_selection.saturating_sub(1);
+                }
+                KeyCode::Down => {
+                    self.palette_selection += 1;
+                }
+                KeyCode::Backspace => {
+                    self.palette_query.pop();
+                    self.palette_selection = 0;
+                }
+                KeyCode::Char(c) => {
+                    self.palette_query.push(c);
+                    self.palette_selection = 0;
+                }
+                _ => {}
+            }
+            return None;
+        }
+
         match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.running = false;
+            }
+            KeyCode::Char('/') if !self.streaming => {
+                self.palette_open = true;
+                self.palette_query.clear();
+                self.palette_selection = 0;
             }
             KeyCode::Tab => {
                 if self.show_repo_panel {
@@ -172,7 +217,9 @@ impl App {
                 }
             }
             KeyCode::Esc => {
-                self.show_repo_panel = false;
+                if self.show_repo_panel {
+                    self.show_repo_panel = false;
+                }
             }
             KeyCode::PageUp => {
                 let page = self.view_height.get().saturating_sub(2);
@@ -208,6 +255,7 @@ impl App {
                 }
             }
         }
+        None
     }
 
     pub fn handle_mouse_scroll(&self, direction: i16) {
@@ -275,6 +323,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
 
     draw_input(frame, chunks[3], app);
+
+    if app.palette_open {
+        draw_command_palette(frame, app);
+    }
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
@@ -343,6 +395,89 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
         .percent(ratio)
         .label(gauge_label);
     frame.render_widget(gauge, header_rows[1]);
+}
+
+fn draw_command_palette(frame: &mut Frame, app: &App) {
+    let area = centered_rect(60, 50, frame.area());
+    frame.render_widget(Clear, area);
+
+    let commands = [
+        ("/model", "Switch AI model"),
+        ("/models", "List available models"),
+        ("/session", "Manage sessions"),
+        ("/clear", "Clear current session"),
+        ("/quit", "Exit zuc1fer"),
+        ("/q", "Exit zuc1fer (short)"),
+        ("/help", "Show help"),
+        ("/config", "Show config path"),
+        ("/toggle-sidebar", "Toggle sidebar panel"),
+    ];
+
+    let filtered: Vec<(&str, &str)> = if app.palette_query.is_empty() {
+        commands.iter().copied().collect()
+    } else {
+        let q = app.palette_query.to_lowercase();
+        commands
+            .iter()
+            .filter(|(cmd, desc)| {
+                cmd.to_lowercase().contains(&q) || desc.to_lowercase().contains(&q)
+            })
+            .copied()
+            .collect()
+    };
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    let query_text = format!("> {}", app.palette_query);
+    let input_block = Paragraph::new(query_text)
+        .block(Block::bordered().title(" Command Palette "))
+        .style(Style::default().fg(Color::White));
+    frame.render_widget(input_block, chunks[0]);
+
+    if !filtered.is_empty() {
+        let items: Vec<String> = filtered
+            .iter()
+            .map(|(cmd, desc)| format!(" {:<20} {}", cmd, desc))
+            .collect();
+
+        let sel = app.palette_selection.min(filtered.len().saturating_sub(1));
+        let mut state = ListState::default().with_selected(Some(sel));
+
+        let list =
+            List::new(items).highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan));
+
+        frame.render_stateful_widget(list, chunks[1], &mut state);
+    }
+
+    if !app.streaming {
+        frame.set_cursor_position((
+            chunks[0].x + app.palette_query.len() as u16 + 2,
+            chunks[0].y + 1,
+        ));
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }
 
 fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App) {
