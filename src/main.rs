@@ -197,6 +197,17 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                         }
                     }
                 }
+            } else if let Some(rest) = dbg.strip_prefix("__MODELS__:") {
+                if let Ok(data) = serde_json::from_str::<serde_json::Value>(rest) {
+                    app.available_models.clear();
+                    if let Some(models) = data["models"].as_array() {
+                        for m in models {
+                            if let Some(name) = m.as_str() {
+                                app.available_models.push(name.to_string());
+                            }
+                        }
+                    }
+                }
             } else if dbg.contains("Running") || dbg.contains("Error") || dbg.contains("retrying") {
                 app.add_system_message(dbg);
             }
@@ -222,9 +233,13 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                         continue;
                     }
                     if key.code == crossterm::event::KeyCode::Enter && !app.streaming {
-                        if app.palette_open {
+                        if app.palette_open || app.show_model_picker {
                             if let Some(cmd) = app.handle_key(key) {
-                                handle_palette_command(&mut app, &cmd);
+                                if let Some(model) = cmd.strip_prefix("__MODEL_SELECT__:") {
+                                    app.add_system_message(format!("Model selected: {model}. Restart with --model={model} to apply."));
+                                } else {
+                                    handle_palette_command(&mut app, &cmd);
+                                }
                             }
                             continue;
                         }
@@ -514,11 +529,15 @@ fn handle_palette_command(app: &mut zuc1fer_tui::App, cmd: &str) {
             app.show_repo_panel = true;
             app.sidebar_tab = 0;
         }
-        "/model" | "/models" => {
-            app.add_system_message(format!(
-                "Current model: {}. Switch with --model= on startup, or set model in ~/.config/zuc1fer/config.toml",
-                app.model
-            ));
+        "/model" => {
+            app.show_model_picker = true;
+            app.model_picker_query.clear();
+            app.model_picker_selection = 0;
+        }
+        "/models" => {
+            app.show_model_picker = true;
+            app.model_picker_query.clear();
+            app.model_picker_selection = 0;
         }
         "/help" => {
             app.add_system_message("Commands: /model /models /session /clear /quit /help /config /toggle-sidebar".into());

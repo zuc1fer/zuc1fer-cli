@@ -32,6 +32,10 @@ pub struct App {
     pub palette_query: String,
     pub palette_selection: usize,
     pub repo_scroll: usize,
+    pub available_models: Vec<String>,
+    pub show_model_picker: bool,
+    pub model_picker_query: String,
+    pub model_picker_selection: usize,
     last_assistant_idx: usize,
     scroll_offset: Cell<usize>,
     auto_scroll: Cell<bool>,
@@ -80,6 +84,10 @@ impl App {
             palette_query: String::new(),
             palette_selection: 0,
             repo_scroll: 0,
+            available_models: Vec::new(),
+            show_model_picker: false,
+            model_picker_query: String::new(),
+            model_picker_selection: 0,
             last_assistant_idx: 0,
             scroll_offset: Cell::new(0),
             auto_scroll: Cell::new(true),
@@ -187,6 +195,42 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<String> {
+        if self.show_model_picker {
+            match key.code {
+                KeyCode::Esc => {
+                    self.show_model_picker = false;
+                    self.model_picker_query.clear();
+                    self.model_picker_selection = 0;
+                }
+                KeyCode::Enter => {
+                    let sel = self.model_picker_selection;
+                    self.show_model_picker = false;
+                    self.model_picker_query.clear();
+                    self.model_picker_selection = 0;
+                    let models = filtered_models(&self.available_models, "");
+                    if let Some(model) = models.get(sel) {
+                        return Some(format!("__MODEL_SELECT__:{}", model));
+                    }
+                }
+                KeyCode::Up => {
+                    self.model_picker_selection = self.model_picker_selection.saturating_sub(1);
+                }
+                KeyCode::Down => {
+                    self.model_picker_selection += 1;
+                }
+                KeyCode::Backspace => {
+                    self.model_picker_query.pop();
+                    self.model_picker_selection = 0;
+                }
+                KeyCode::Char(c) => {
+                    self.model_picker_query.push(c);
+                    self.model_picker_selection = 0;
+                }
+                _ => {}
+            }
+            return None;
+        }
+
         if self.palette_open {
             match key.code {
                 KeyCode::Esc => {
@@ -363,6 +407,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if app.palette_open {
         draw_command_palette(frame, app);
     }
+    if app.show_model_picker {
+        draw_model_picker(frame, app);
+    }
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
@@ -499,6 +546,67 @@ fn draw_command_palette(frame: &mut Frame, app: &App) {
             chunks[0].y + 1,
         ));
     }
+}
+
+fn draw_model_picker(frame: &mut Frame, app: &App) {
+    let area = centered_rect(60, 60, frame.area());
+    frame.render_widget(Clear, area);
+
+    let models = filtered_models(&app.available_models, &app.model_picker_query);
+    let items: Vec<String> = models
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let marker: String = if m.as_str() == app.model.as_str() {
+                " ●".into()
+            } else {
+                format!(" {}.", i + 1)
+            };
+            format!("{} {}", marker, m)
+        })
+        .collect();
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    let query_text = format!("> {}", app.model_picker_query);
+    let nb = format!("{} models", app.available_models.len());
+    frame.render_widget(
+        Paragraph::new(query_text).block(Block::bordered().title(format!(" Switch Model ({nb}) "))),
+        chunks[0],
+    );
+
+    if !items.is_empty() {
+        let sel = app
+            .model_picker_selection
+            .min(items.len().saturating_sub(1));
+        let mut state = ListState::default().with_selected(Some(sel));
+        frame.render_stateful_widget(
+            List::new(items).highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan)),
+            chunks[1],
+            &mut state,
+        );
+    }
+
+    if !app.streaming {
+        frame.set_cursor_position((
+            chunks[0].x + app.model_picker_query.len() as u16 + 2,
+            chunks[0].y + 1,
+        ));
+    }
+}
+
+fn filtered_models<'a>(models: &'a [String], query: &str) -> Vec<&'a String> {
+    if query.is_empty() {
+        return models.iter().collect();
+    }
+    let q = query.to_lowercase();
+    models
+        .iter()
+        .filter(|m| m.to_lowercase().contains(&q))
+        .collect()
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
