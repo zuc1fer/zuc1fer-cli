@@ -268,6 +268,109 @@ impl Agent {
         self.provider_registry.list_models()
     }
 
+    async fn maybe_compact(
+        &self,
+        session: &mut Session,
+        provider: &Arc<dyn zuc1fer_llm::LlmProvider>,
+        model_name: &str,
+    ) {
+        let token_limit: u64 = 90_000;
+        let mut total_tokens: u64 = 0;
+        for msg in &session.messages {
+            total_tokens += provider.estimate_tokens(&msg.content);
+        }
+
+        if total_tokens <= token_limit {
+            return;
+        }
+
+        if session.messages.len() < 8 {
+            return;
+        }
+
+        let keep_count = 6;
+        let to_compact: Vec<_> = session
+            .messages
+            .iter()
+            .take(session.messages.len().saturating_sub(keep_count))
+            .cloned()
+            .collect();
+
+        if to_compact.is_empty() {
+            return;
+        }
+
+        let history_text: String = to_compact
+            .iter()
+            .map(|m| format!("[{}]: {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        let compact_prompt = format!(
+            "Summarize this conversation history concisely. Preserve key decisions, file changes, \
+             errors encountered, and important context. Keep it under 500 words.\n\n{history_text}"
+        );
+
+        let request = ChatRequest {
+            model: model_name.to_string(),
+            system: "You are a context summarizer. Output only the summary, no preamble.".into(),
+            messages: vec![zuc1fer_llm::Message {
+                role: zuc1fer_llm::Role::User,
+                content: vec![zuc1fer_llm::ContentBlock::Text {
+                    text: compact_prompt,
+                }],
+            }],
+            tools: vec![],
+            max_tokens: 1024,
+            temperature: Some(0.0),
+            top_p: None,
+            cache_system: false,
+        };
+
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let provider_clone = provider.clone();
+
+        let handle =
+            tokio::spawn(async move { provider_clone.stream_chat(request, event_tx).await });
+
+        let mut summary = String::new();
+        while let Some(event) = event_rx.recv().await {
+            if let StreamEvent::TextDelta { text } = event {
+                summary.push_str(&text);
+            }
+        }
+        let _ = handle.await;
+
+        if summary.is_empty() {
+            return;
+        }
+
+        let compacted_msg = SessionMessage {
+            role: "system".into(),
+            content: format!("[Compacted context]\n{summary}"),
+            tool_calls: None,
+            tool_results: None,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+
+        session.messages = std::iter::once(compacted_msg)
+            .chain(
+                session
+                    .messages
+                    .clone()
+                    .into_iter()
+                    .skip(to_compact.len()),
+            )
+            .collect();
+
+        tracing::info!(
+            "Context compacted: {} messages → 1 summary ({} → {} est tokens)",
+            to_compact.len(),
+            total_tokens,
+            provider.estimate_tokens(&summary)
+        );
+    }
+
     pub async fn run(
         &self,
         session: &mut Session,
@@ -306,6 +409,7 @@ impl Agent {
                 )
             })?;
 
+        self.maybe_compact(session, &provider, &model_name).await;
         self.emit_repomap();
 
         session.add_message(SessionMessage {
