@@ -630,7 +630,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::raw(" "));
     }
     spans.push(Span::styled("◆ ", Style::default().fg(ACCENT)));
-    spans.push(Span::styled("zuc1fer", accent_bold()));
+    spans.push(Span::styled("ophis", accent_bold()));
     spans.push(sep.clone());
     spans.push(Span::styled(
         app.model.clone(),
@@ -683,8 +683,8 @@ fn palette_commands() -> [(&'static str, &'static str); 10] {
         ("/models", "List available models"),
         ("/session", "Manage sessions"),
         ("/clear", "Clear current session"),
-        ("/quit", "Exit zuc1fer"),
-        ("/q", "Exit zuc1fer (short)"),
+        ("/quit", "Exit ophis"),
+        ("/q", "Exit ophis (short)"),
         ("/help", "Show help"),
         ("/config", "Show config path"),
         ("/toggle-sidebar", "Toggle sidebar panel"),
@@ -1223,7 +1223,7 @@ fn draw_todos_tab(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_splash(frame: &mut Frame, area: Rect) {
-    let art = ascii_art::splash_display(area.width);
+    let art = ascii_art::splash_display(area.width, area.height);
     let total = art.len() as u16;
     let top_pad = area.height.saturating_sub(total) / 2;
     let mut content: Vec<Line> = Vec::with_capacity(art.len() + top_pad as usize);

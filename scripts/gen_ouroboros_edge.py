@@ -33,7 +33,7 @@ for i in range(0, len(pixels), 8):
             byte |= 1 << (7 - j)
     packed.append(byte)
 
-out_dir = r"C:\Users\zinou\Documents\Workspace\zuc1fer-cli\crates\zuc1fer-tui\src"
+out_dir = r"C:\Users\zinou\Documents\Workspace\ophis-cli\crates\ophis-tui\src"
 bin_path = f"{out_dir}\\ouroboros_edge.dat"
 with open(bin_path, "wb") as f:
     f.write(struct.pack("<II", BASE_W, BASE_H))
