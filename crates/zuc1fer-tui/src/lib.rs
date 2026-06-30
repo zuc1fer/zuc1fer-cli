@@ -1223,7 +1223,7 @@ fn draw_todos_tab(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_splash(frame: &mut Frame, area: Rect) {
-    let art = ascii_art::splash_lines();
+    let art = ascii_art::splash_display(area.width);
     let total = art.len() as u16;
     let top_pad = area.height.saturating_sub(total) / 2;
     let mut content: Vec<Line> = Vec::with_capacity(art.len() + top_pad as usize);
