@@ -11,6 +11,8 @@ pub struct Config {
     pub system_prompt: Option<String>,
     pub safe_mode: bool,
     #[serde(default)]
+    pub require_approval: bool,
+    #[serde(default)]
     pub mcp: Vec<McpServerConfig>,
 }
 
@@ -76,6 +78,7 @@ impl Default for Config {
             temperature: None,
             system_prompt: None,
             safe_mode: false,
+            require_approval: false,
             mcp: Vec::new(),
         }
     }

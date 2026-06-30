@@ -9,12 +9,13 @@ use crate::repomap::RepoMap;
 use crate::semantic_tool::SemanticTool;
 use crate::session::{Session, SessionMessage};
 use crate::session_store::SessionStore;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use zuc1fer_llm::{
     ChatRequest, ProviderRegistry, StreamEvent, ToolDefinition,
 };
-use zuc1fer_tools::{ToolCall, ToolContext, ToolRegistry};
+use zuc1fer_tools::{ToolCall, ToolContext, ToolRegistry, ToolResult};
 
 const MAX_RETRIES: u32 = 3;
 const BASE_BACKOFF_MS: u64 = 1000;
@@ -67,6 +68,18 @@ pub struct TuiOutput {
     pub tx: tokio::sync::mpsc::UnboundedSender<AgentEvent>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalDecision {
+    Approve,
+    ApproveAll,
+    Deny,
+}
+
+#[async_trait::async_trait]
+pub trait Approver: Send + Sync {
+    async fn approve(&self, tool: &str, detail: &str) -> ApprovalDecision;
+}
+
 pub struct Agent {
     config: Config,
     provider_registry: ProviderRegistry,
@@ -80,6 +93,8 @@ pub struct Agent {
     mcp_bridges: Vec<Arc<McpBridge>>,
     tui: Option<TuiOutput>,
     session_store: Option<Arc<SessionStore>>,
+    approver: Option<Arc<dyn Approver>>,
+    approved_tools: Mutex<HashSet<String>>,
 }
 
 impl Agent {
@@ -217,6 +232,8 @@ impl Agent {
             mcp_bridges,
             tui: None,
             session_store: None,
+            approver: None,
+            approved_tools: Mutex::new(HashSet::new()),
         })
     }
 
@@ -228,6 +245,49 @@ impl Agent {
     pub fn with_session_store(mut self, store: Arc<SessionStore>) -> Self {
         self.session_store = Some(store);
         self
+    }
+
+    pub fn with_approver(mut self, approver: Arc<dyn Approver>) -> Self {
+        self.approver = Some(approver);
+        self
+    }
+
+    async fn gate_approvals(&self, tool_calls: &[ToolCall]) -> HashSet<String> {
+        let mut denied = HashSet::new();
+        if !self.config.require_approval {
+            return denied;
+        }
+        let approver = match &self.approver {
+            Some(a) => a.clone(),
+            None => return denied,
+        };
+        const MUTATING: &[&str] = &["bash", "write", "edit"];
+        for tc in tool_calls {
+            if !MUTATING.contains(&tc.name.as_str()) {
+                continue;
+            }
+            if self
+                .approved_tools
+                .lock()
+                .map(|s| s.contains(&tc.name))
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let detail = approval_detail(&tc.name, &tc.arguments);
+            match approver.approve(&tc.name, &detail).await {
+                ApprovalDecision::Approve => {}
+                ApprovalDecision::ApproveAll => {
+                    if let Ok(mut s) = self.approved_tools.lock() {
+                        s.insert(tc.name.clone());
+                    }
+                }
+                ApprovalDecision::Deny => {
+                    denied.insert(tc.id.clone());
+                }
+            }
+        }
+        denied
     }
 
     fn emit(&self, text: &str) {
@@ -684,12 +744,21 @@ impl Agent {
                 safe_mode: self.config.safe_mode,
             };
 
-            self.emit_tool(&format!("Running {} tool(s)...", tool_calls.len()));
+            let denied = self.gate_approvals(&tool_calls).await;
+            let approved_calls: Vec<ToolCall> = tool_calls
+                .iter()
+                .filter(|tc| !denied.contains(&tc.id))
+                .cloned()
+                .collect();
 
-            let results = self
+            self.emit_tool(&format!("Running {} tool(s)...", approved_calls.len()));
+
+            let executed = self
                 .tool_registry
-                .execute_parallel(&tool_calls, &ctx)
+                .execute_parallel(&approved_calls, &ctx)
                 .await;
+
+            let results = merge_tool_results(&tool_calls, executed, &denied);
 
             for result in &results {
                 if result.is_error {
@@ -789,6 +858,38 @@ pub struct AgentResponse {
     pub usage: Option<zuc1fer_llm::Usage>,
 }
 
+fn approval_detail(tool: &str, args: &serde_json::Value) -> String {
+    match tool {
+        "bash" => args["command"].as_str().unwrap_or("").to_string(),
+        "write" | "edit" => args["filePath"].as_str().unwrap_or("").to_string(),
+        _ => String::new(),
+    }
+}
+
+fn merge_tool_results(
+    tool_calls: &[ToolCall],
+    executed: Vec<ToolResult>,
+    denied: &HashSet<String>,
+) -> Vec<ToolResult> {
+    if denied.is_empty() {
+        return executed;
+    }
+    let mut by_id: HashMap<String, ToolResult> = executed
+        .into_iter()
+        .map(|r| (r.tool_call_id.clone(), r))
+        .collect();
+    tool_calls
+        .iter()
+        .filter_map(|tc| {
+            if denied.contains(&tc.id) {
+                Some(ToolResult::error(&tc.id, "Denied by user."))
+            } else {
+                by_id.remove(&tc.id)
+            }
+        })
+        .collect()
+}
+
 fn model_context_for_compaction(model: &str) -> u64 {
     let lower = model.to_lowercase();
     if lower.contains("gemini") {
@@ -803,5 +904,56 @@ fn model_context_for_compaction(model: &str) -> u64 {
         200_000
     } else {
         128_000
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn call(id: &str, name: &str) -> ToolCall {
+        ToolCall {
+            id: id.into(),
+            name: name.into(),
+            arguments: serde_json::json!({}),
+        }
+    }
+
+    #[test]
+    fn merge_no_denials_is_passthrough() {
+        let calls = vec![call("a", "read"), call("b", "read")];
+        let executed = vec![ToolResult::success("a", "ra"), ToolResult::success("b", "rb")];
+        let merged = merge_tool_results(&calls, executed, &HashSet::new());
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].tool_call_id, "a");
+        assert!(!merged[0].is_error);
+    }
+
+    #[test]
+    fn merge_denied_preserves_order_and_marks_error() {
+        let calls = vec![call("a", "read"), call("b", "write"), call("c", "read")];
+        let executed = vec![ToolResult::success("c", "rc"), ToolResult::success("a", "ra")];
+        let mut denied = HashSet::new();
+        denied.insert("b".to_string());
+        let merged = merge_tool_results(&calls, executed, &denied);
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0].tool_call_id, "a");
+        assert_eq!(merged[1].tool_call_id, "b");
+        assert_eq!(merged[2].tool_call_id, "c");
+        assert!(merged[1].is_error);
+        assert!(merged[1].content.contains("Denied"));
+    }
+
+    #[test]
+    fn approval_detail_extracts_command_and_path() {
+        assert_eq!(
+            approval_detail("bash", &serde_json::json!({"command": "rm -rf /"})),
+            "rm -rf /"
+        );
+        assert_eq!(
+            approval_detail("write", &serde_json::json!({"filePath": "/tmp/x"})),
+            "/tmp/x"
+        );
+        assert_eq!(approval_detail("read", &serde_json::json!({})), "");
     }
 }
