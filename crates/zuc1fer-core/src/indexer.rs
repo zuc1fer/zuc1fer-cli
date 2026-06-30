@@ -93,12 +93,7 @@ impl Indexer {
         let mut pending: HashSet<PathBuf> = HashSet::new();
         let debounce = Duration::from_secs(2);
 
-        loop {
-            let event = match rx.blocking_recv() {
-                Some(e) => e,
-                None => break,
-            };
-
+        while let Some(event) = rx.blocking_recv() {
             let is_relevant = matches!(
                 event.kind,
                 EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
@@ -182,16 +177,11 @@ impl Indexer {
 
 fn collect_source_files(dir: &PathBuf, extensions: &HashSet<&str>) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    collect_files_recursive(dir, dir, extensions, &mut files);
+    collect_files_recursive(dir, extensions, &mut files);
     files
 }
 
-fn collect_files_recursive(
-    base: &PathBuf,
-    dir: &PathBuf,
-    extensions: &HashSet<&str>,
-    files: &mut Vec<PathBuf>,
-) {
+fn collect_files_recursive(dir: &PathBuf, extensions: &HashSet<&str>, files: &mut Vec<PathBuf>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
@@ -206,7 +196,7 @@ fn collect_files_recursive(
         }
 
         if path.is_dir() {
-            collect_files_recursive(base, &path, extensions, files);
+            collect_files_recursive(&path, extensions, files);
         } else if let Some(ext) = path.extension() {
             if extensions.contains(ext.to_string_lossy().as_ref()) {
                 files.push(path);

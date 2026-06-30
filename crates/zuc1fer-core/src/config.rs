@@ -72,7 +72,7 @@ impl Default for Config {
             model: "deepseek/deepseek-v4-pro".into(),
             providers,
             max_turns: 100,
-            max_tokens_per_turn: 4096,
+            max_tokens_per_turn: 8192,
             temperature: None,
             system_prompt: None,
             safe_mode: false,
