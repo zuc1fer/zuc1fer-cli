@@ -141,6 +141,8 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     let working_dir = std::env::current_dir()?;
     let mut config = Config::load()?;
 
+    let mut _verbose = false;
+
     let mut args_iter = args.iter().skip(2);
     while let Some(arg) = args_iter.next() {
         if let Some(model) = arg.strip_prefix("--model=") {
@@ -153,6 +155,8 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
             config.safe_mode = true;
         } else if arg == "--confirm" {
             config.require_approval = true;
+        } else if arg == "--verbose" {
+            _verbose = true;
         }
     }
 
@@ -380,6 +384,7 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
     let mut config = Config::load()?;
 
     let mut one_shot_prompt: Option<String> = None;
+    let mut verbose = false;
 
     let mut args_iter = args.iter().skip(2);
     while let Some(arg) = args_iter.next() {
@@ -387,6 +392,8 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
             config.safe_mode = true;
         } else if arg == "--confirm" {
             config.require_approval = true;
+        } else if arg == "--verbose" {
+            verbose = true;
         } else if let Some(model) = arg.strip_prefix("--model=") {
             config.model = model.to_string();
         } else if arg == "--model" {
@@ -434,17 +441,33 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
         match result {
             Ok(response) => {
                 if let Some(usage) = &response.usage {
-                    let cache_hit = usage
+                    let cache_read = usage
                         .cache_read_tokens
                         .map(|t| format!(" ({} cached)", t))
                         .unwrap_or_default();
-                    tracing::debug!(
-                        "Tokens: {} in + {} out = {}{}",
-                        usage.prompt_tokens,
-                        usage.completion_tokens,
-                        usage.total_tokens,
-                        cache_hit,
-                    );
+                    let cache_write = usage
+                        .cache_write_tokens
+                        .map(|t| format!(" ({} written)", t))
+                        .unwrap_or_default();
+                    if verbose {
+                        eprintln!(
+                            "[ophis] Tokens: {} in + {} out = {}{}{}",
+                            usage.prompt_tokens,
+                            usage.completion_tokens,
+                            usage.total_tokens,
+                            cache_read,
+                            cache_write,
+                        );
+                    } else {
+                        tracing::debug!(
+                            "Tokens: {} in + {} out = {}{}{}",
+                            usage.prompt_tokens,
+                            usage.completion_tokens,
+                            usage.total_tokens,
+                            cache_read,
+                            cache_write,
+                        );
+                    }
                 }
             }
             Err(e) => {
@@ -513,17 +536,33 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
         match result {
             Ok(response) => {
                 if let Some(usage) = &response.usage {
-                    let cache_hit = usage
+                    let cache_read = usage
                         .cache_read_tokens
                         .map(|t| format!(" ({} cached)", t))
                         .unwrap_or_default();
-                    tracing::debug!(
-                        "Tokens: {} in + {} out = {}{}",
-                        usage.prompt_tokens,
-                        usage.completion_tokens,
-                        usage.total_tokens,
-                        cache_hit,
-                    );
+                    let cache_write = usage
+                        .cache_write_tokens
+                        .map(|t| format!(" ({} written)", t))
+                        .unwrap_or_default();
+                    if verbose {
+                        eprintln!(
+                            "[ophis] Tokens: {} in + {} out = {}{}{}",
+                            usage.prompt_tokens,
+                            usage.completion_tokens,
+                            usage.total_tokens,
+                            cache_read,
+                            cache_write,
+                        );
+                    } else {
+                        tracing::debug!(
+                            "Tokens: {} in + {} out = {}{}{}",
+                            usage.prompt_tokens,
+                            usage.completion_tokens,
+                            usage.total_tokens,
+                            cache_read,
+                            cache_write,
+                        );
+                    }
                 }
             }
             Err(e) => {
@@ -690,21 +729,31 @@ fn handle_palette_command(app: &mut ophis_tui::App, cmd: &str) {
 fn print_usage(bin: &str) {
     println!("ophis v{VERSION} — the coding agent CLI\n");
     println!("Usage:");
-    println!("  {bin} chat [--model=provider/model] [--tui] [--safe]");
+    println!("  {bin} chat [--model=provider/model] [--tui] [--safe] [--confirm] [--verbose]");
+    println!("  {bin} chat --prompt=\"prompt\" [--model=provider/model] [--safe] [--verbose]");
     println!("  {bin} models");
     println!("  {bin} config");
     println!("  {bin} --version");
     println!();
+    println!("Flags:");
+    println!("  --model=<provider/model>  Model to use (e.g., opencode/deepseek-v4-flash-free)");
+    println!("  --tui                     Launch the terminal UI");
+    println!("  --safe                    Restrict to read-only tools");
+    println!("  --confirm                 Require approval before write/edit/bash");
+    println!("  --verbose                 Print per-turn token usage");
+    println!("  --prompt=<text>           One-shot prompt (non-interactive)");
+    println!();
     println!("Examples:");
     println!("  {bin} chat --model=deepseek/deepseek-chat");
-    println!("  {bin} chat --tui --model=deepseek/deepseek-chat");
-    println!("  {bin} chat --prompt=\"explain this project\"");
+    println!("  {bin} chat --tui");
+    println!("  {bin} chat --prompt=\"explain this project\" --verbose");
     println!();
     println!("Environment variables:");
-    println!("  DEEPSEEK_API_KEY   DeepSeek API key");
-    println!("  ANTHROPIC_API_KEY  Anthropic API key");
-    println!("  OPENAI_API_KEY     OpenAI API key");
-    println!("  OPHIS_LOG        Log level (trace, debug, info, warn, error)");
+    println!("  DEEPSEEK_API_KEY    DeepSeek API key");
+    println!("  ANTHROPIC_API_KEY   Anthropic API key");
+    println!("  OPENAI_API_KEY      OpenAI API key");
+    println!("  OPENCODE_API_KEY    OpenCode API key (optional for free models)");
+    println!("  OPHIS_LOG           Log level (trace, debug, info, warn, error)");
 }
 
 fn print_session_help() {
