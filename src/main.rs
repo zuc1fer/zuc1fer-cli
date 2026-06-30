@@ -141,9 +141,14 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     let working_dir = std::env::current_dir()?;
     let mut config = Config::load()?;
 
-    for arg in args.iter().skip(2) {
+    let mut args_iter = args.iter().skip(2);
+    while let Some(arg) = args_iter.next() {
         if let Some(model) = arg.strip_prefix("--model=") {
             config.model = model.to_string();
+        } else if arg == "--model" {
+            if let Some(model) = args_iter.next() {
+                config.model = model.to_string();
+            }
         } else if arg == "--safe" {
             config.safe_mode = true;
         } else if arg == "--confirm" {
@@ -376,15 +381,24 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
 
     let mut one_shot_prompt: Option<String> = None;
 
-    for arg in args.iter().skip(2) {
+    let mut args_iter = args.iter().skip(2);
+    while let Some(arg) = args_iter.next() {
         if arg == "--safe" {
             config.safe_mode = true;
         } else if arg == "--confirm" {
             config.require_approval = true;
         } else if let Some(model) = arg.strip_prefix("--model=") {
             config.model = model.to_string();
+        } else if arg == "--model" {
+            if let Some(model) = args_iter.next() {
+                config.model = model.to_string();
+            }
         } else if let Some(prompt) = arg.strip_prefix("--prompt=") {
             one_shot_prompt = Some(prompt.to_string());
+        } else if arg == "--prompt" {
+            if let Some(prompt) = args_iter.next() {
+                one_shot_prompt = Some(prompt.to_string());
+            }
         }
     }
 
@@ -396,7 +410,7 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
         .get(provider)
         .ok_or_else(|| anyhow::anyhow!("No config for provider '{provider}'. Set {provider}_API_KEY or add to ~/.config/ophis/config.toml"))?;
 
-    if provider_config.api_key.is_empty() {
+    if provider_config.api_key.is_empty() && provider != "opencode" {
         anyhow::bail!(
             "No API key for provider '{provider}'. Set {}_API_KEY environment variable.",
             provider.to_uppercase()

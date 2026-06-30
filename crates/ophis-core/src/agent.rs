@@ -101,7 +101,8 @@ impl Agent {
         let mut tool_registry = ToolRegistry::new();
 
         for (name, provider_config) in &config.providers {
-            if !provider_config.api_key.is_empty() {
+            let needs_key = !provider_config.api_key.is_empty();
+            if needs_key || name == "opencode" || name == "ollama" {
                 match name.as_str() {
                     "deepseek" => {
                         let mut p = ophis_llm::providers::deepseek::DeepSeekProvider::new(
@@ -128,8 +129,17 @@ impl Agent {
                         }
                         provider_registry.register(Box::new(p));
                     }
+                    "opencode" => {
+                        let mut p = ophis_llm::providers::opencode::OpenCodeProvider::new(
+                            provider_config.api_key.clone(),
+                        );
+                        if let Some(ref url) = provider_config.base_url {
+                            p = p.with_base_url(url);
+                        }
+                        provider_registry.register(Box::new(p));
+                    }
                     "openrouter" => {
-                        if !provider_config.api_key.is_empty() {
+                        if needs_key {
                             provider_registry.register(Box::new(
                                 ophis_llm::providers::openrouter::OpenRouterProvider::new(
                                     provider_config.api_key.clone(),

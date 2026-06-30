@@ -2,4 +2,5 @@ pub mod anthropic;
 pub mod deepseek;
 pub mod ollama;
 pub mod openai;
+pub mod opencode;
 pub mod openrouter;
