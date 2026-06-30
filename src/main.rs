@@ -1,10 +1,62 @@
-use zuc1fer_core::agent::{Agent, AgentEvent};
+use zuc1fer_core::agent::{Agent, AgentEvent, ApprovalDecision, Approver};
 use zuc1fer_core::config::Config;
 use zuc1fer_core::session::Session;
 use zuc1fer_core::session_store::SessionStore;
 use std::sync::Arc;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+struct ApprovalRequest {
+    tool: String,
+    detail: String,
+    reply: tokio::sync::oneshot::Sender<ApprovalDecision>,
+}
+
+struct TuiApprover {
+    tx: tokio::sync::mpsc::UnboundedSender<ApprovalRequest>,
+}
+
+#[async_trait::async_trait]
+impl Approver for TuiApprover {
+    async fn approve(&self, tool: &str, detail: &str) -> ApprovalDecision {
+        let (reply, reply_rx) = tokio::sync::oneshot::channel();
+        let req = ApprovalRequest {
+            tool: tool.to_string(),
+            detail: detail.to_string(),
+            reply,
+        };
+        if self.tx.send(req).is_err() {
+            return ApprovalDecision::Approve;
+        }
+        reply_rx.await.unwrap_or(ApprovalDecision::Deny)
+    }
+}
+
+struct CliApprover;
+
+#[async_trait::async_trait]
+impl Approver for CliApprover {
+    async fn approve(&self, tool: &str, detail: &str) -> ApprovalDecision {
+        let prompt = format!(
+            "\nApprove `{tool}`? {detail}\n  [y]es / [n]o / [a]ll this session: "
+        );
+        let line = tokio::task::spawn_blocking(move || {
+            use std::io::Write;
+            print!("{prompt}");
+            let _ = std::io::stdout().flush();
+            let mut input = String::new();
+            let _ = std::io::stdin().read_line(&mut input);
+            input
+        })
+        .await
+        .unwrap_or_default();
+        match line.trim().to_lowercase().as_str() {
+            "a" | "all" => ApprovalDecision::ApproveAll,
+            "n" | "no" => ApprovalDecision::Deny,
+            _ => ApprovalDecision::Approve,
+        }
+    }
+}
 
 pub fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -91,6 +143,8 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
             config.model = model.to_string();
         } else if arg == "--safe" {
             config.safe_mode = true;
+        } else if arg == "--confirm" {
+            config.require_approval = true;
         }
     }
 
@@ -99,10 +153,13 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
     let (prompt_tx, mut prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (approval_tx, mut approval_rx) =
+        tokio::sync::mpsc::unbounded_channel::<ApprovalRequest>();
 
     let agent = rt.block_on(Agent::new(config, working_dir.clone()))?
         .with_tui(event_tx.clone())
-        .with_session_store(Arc::new(open_store()?));
+        .with_session_store(Arc::new(open_store()?))
+        .with_approver(Arc::new(TuiApprover { tx: approval_tx }));
     let agent = Arc::new(agent);
     let session = Arc::new(tokio::sync::Mutex::new(Session::new(
         uuid::Uuid::new_v4().to_string(),
@@ -118,6 +175,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
 
     let mut app = App::new(&model);
     let mut current_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut pending_reply: Option<tokio::sync::oneshot::Sender<ApprovalDecision>> = None;
 
     loop {
         while let Ok(prompt) = prompt_rx.try_recv() {
@@ -188,6 +246,11 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
             }
         }
 
+        while let Ok(req) = approval_rx.try_recv() {
+            app.pending_approval = Some((req.tool, req.detail));
+            pending_reply = Some(req.reply);
+        }
+
         terminal.draw(|f| zuc1fer_tui::draw(f, &app))?;
 
         if !app.running {
@@ -199,6 +262,28 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
             match crossterm::event::read()? {
                 crossterm::event::Event::Key(key) => {
                     if key.kind != crossterm::event::KeyEventKind::Press {
+                        continue;
+                    }
+                    if app.pending_approval.is_some() {
+                        let decision = match key.code {
+                            crossterm::event::KeyCode::Char('y')
+                            | crossterm::event::KeyCode::Char('Y')
+                            | crossterm::event::KeyCode::Enter => Some(ApprovalDecision::Approve),
+                            crossterm::event::KeyCode::Char('a')
+                            | crossterm::event::KeyCode::Char('A') => {
+                                Some(ApprovalDecision::ApproveAll)
+                            }
+                            crossterm::event::KeyCode::Char('n')
+                            | crossterm::event::KeyCode::Char('N')
+                            | crossterm::event::KeyCode::Esc => Some(ApprovalDecision::Deny),
+                            _ => None,
+                        };
+                        if let Some(d) = decision {
+                            if let Some(reply) = pending_reply.take() {
+                                let _ = reply.send(d);
+                            }
+                            app.pending_approval = None;
+                        }
                         continue;
                     }
                     if app.streaming && key.code == crossterm::event::KeyCode::Esc {
@@ -278,6 +363,8 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
     for arg in args.iter().skip(2) {
         if arg == "--safe" {
             config.safe_mode = true;
+        } else if arg == "--confirm" {
+            config.require_approval = true;
         } else if let Some(model) = arg.strip_prefix("--model=") {
             config.model = model.to_string();
         } else if let Some(prompt) = arg.strip_prefix("--prompt=") {
@@ -302,7 +389,8 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
 
     let rt = tokio::runtime::Runtime::new()?;
     let agent = rt.block_on(Agent::new(config, working_dir.clone()))?
-        .with_session_store(Arc::new(open_store()?));
+        .with_session_store(Arc::new(open_store()?))
+        .with_approver(Arc::new(CliApprover));
     let mut session = Session::new(
         uuid::Uuid::new_v4().to_string(),
         working_dir.display().to_string(),

@@ -3598,6 +3598,7 @@ name = "zuc1fer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "crossterm",
  "ratatui",
  "serde_json",

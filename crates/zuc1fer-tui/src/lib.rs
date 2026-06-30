@@ -55,6 +55,7 @@ pub struct App {
     pub show_session_picker: bool,
     pub session_picker_selection: usize,
     pub todos: Vec<TodoItem>,
+    pub pending_approval: Option<(String, String)>,
     pub input_history: Vec<String>,
     history_index: Option<usize>,
     saved_input: Option<String>,
@@ -129,6 +130,7 @@ impl App {
             show_session_picker: false,
             session_picker_selection: 0,
             todos: Vec::new(),
+            pending_approval: None,
             input_history: Vec::new(),
             history_index: None,
             saved_input: None,
@@ -583,6 +585,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if app.show_session_picker {
         draw_session_picker(frame, app);
     }
+    if app.pending_approval.is_some() {
+        draw_approval_modal(frame, app);
+    }
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
@@ -828,6 +833,42 @@ fn draw_session_picker(frame: &mut Frame, app: &App) {
             &mut state,
         );
     }
+}
+
+fn draw_approval_modal(frame: &mut Frame, app: &App) {
+    let (tool, detail) = match &app.pending_approval {
+        Some(p) => p,
+        None => return,
+    };
+    let area = centered_rect(60, 30, frame.area());
+    frame.render_widget(Clear, area);
+
+    let detail_disp: String = detail.chars().take(200).collect();
+    let lines = vec![
+        Line::from(vec![Span::styled(
+            format!(" Tool: {tool}"),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            format!("  {detail_disp}"),
+            Style::default().fg(Color::White),
+        )]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "  [y] approve    [n] deny    [a] approve all this session",
+            Style::default().fg(Color::Gray),
+        )]),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(Block::bordered().title(" Approval required "))
+            .style(Style::default().fg(Color::White)),
+        area,
+    );
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
