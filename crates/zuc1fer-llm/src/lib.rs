@@ -1,4 +1,5 @@
 pub mod providers;
+pub mod sse;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

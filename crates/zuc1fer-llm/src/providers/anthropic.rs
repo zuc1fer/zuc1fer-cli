@@ -20,19 +20,29 @@ impl AnthropicProvider {
     }
 
     fn convert_request(&self, request: &ChatRequest) -> Value {
-        let mut messages: Vec<Value> = Vec::new();
+        let mut merged: Vec<(&str, Vec<Value>)> = Vec::new();
         for msg in &request.messages {
             if matches!(msg.role, crate::Role::System) {
                 continue;
             }
-            let content = self.convert_content(&msg.content);
             let role = match msg.role {
                 crate::Role::User | crate::Role::Tool => "user",
                 crate::Role::Assistant => "assistant",
                 crate::Role::System => unreachable!(),
             };
-            messages.push(serde_json::json!({ "role": role, "content": content }));
+            let blocks = self.content_blocks(&msg.content);
+            if blocks.is_empty() {
+                continue;
+            }
+            match merged.last_mut() {
+                Some(last) if last.0 == role => last.1.extend(blocks),
+                _ => merged.push((role, blocks)),
+            }
         }
+        let messages: Vec<Value> = merged
+            .into_iter()
+            .map(|(role, blocks)| serde_json::json!({ "role": role, "content": blocks }))
+            .collect();
 
         let tools: Vec<Value> = request
             .tools
@@ -82,39 +92,33 @@ impl AnthropicProvider {
         body
     }
 
-    fn convert_content(&self, blocks: &[ContentBlock]) -> Value {
-        if blocks.len() == 1 {
-            if let ContentBlock::Text { text } = &blocks[0] {
-                return Value::String(text.clone());
-            }
-        }
-        Value::Array(
-            blocks
-                .iter()
-                .map(|b| match b {
-                    ContentBlock::Text { text } => serde_json::json!({
-                        "type": "text",
-                        "text": text,
-                    }),
-                    ContentBlock::ToolUse { id, name, input } => serde_json::json!({
-                        "type": "tool_use",
-                        "id": id,
-                        "name": name,
-                        "input": input,
-                    }),
-                    ContentBlock::ToolResult {
-                        tool_use_id,
-                        content,
-                        is_error,
-                    } => serde_json::json!({
-                        "type": "tool_result",
-                        "tool_use_id": tool_use_id,
-                        "content": content,
-                        "is_error": is_error.unwrap_or(false),
-                    }),
-                })
-                .collect(),
-        )
+    fn content_blocks(&self, blocks: &[ContentBlock]) -> Vec<Value> {
+        blocks
+            .iter()
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } if text.is_empty() => None,
+                ContentBlock::Text { text } => Some(serde_json::json!({
+                    "type": "text",
+                    "text": text,
+                })),
+                ContentBlock::ToolUse { id, name, input } => Some(serde_json::json!({
+                    "type": "tool_use",
+                    "id": id,
+                    "name": name,
+                    "input": input,
+                })),
+                ContentBlock::ToolResult {
+                    tool_use_id,
+                    content,
+                    is_error,
+                } => Some(serde_json::json!({
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": content,
+                    "is_error": is_error.unwrap_or(false),
+                })),
+            })
+            .collect()
     }
 }
 
@@ -148,17 +152,23 @@ impl LlmProvider for AnthropicProvider {
 
         use futures::StreamExt;
         let mut stream = response.bytes_stream();
+        let mut line_buf = crate::sse::LineBuffer::new();
         let mut text_buf = String::new();
         let mut current_tool_id = String::new();
         let mut current_tool_name = String::new();
         let mut current_tool_input = String::new();
         let mut usage = Usage::default();
 
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            let text = String::from_utf8_lossy(&chunk);
-
-            for line in text.lines() {
+        let mut stream_done = false;
+        while !stream_done {
+            let lines: Vec<String> = match stream.next().await {
+                Some(chunk) => line_buf.push(&chunk?),
+                None => {
+                    stream_done = true;
+                    line_buf.flush().into_iter().collect()
+                }
+            };
+            for line in lines {
                 let line = line.trim();
                 if line.is_empty() {
                     continue;
@@ -195,7 +205,7 @@ impl LlmProvider for AnthropicProvider {
                                     text: t.to_string(),
                                 });
                             }
-                            if let Some(input) = obj["delta"]["input_json"].as_str() {
+                            if let Some(input) = obj["delta"]["partial_json"].as_str() {
                                 current_tool_input.push_str(input);
                                 let _ = event_tx.send(StreamEvent::ToolUseDelta {
                                     id: current_tool_id.clone(),
@@ -275,6 +285,6 @@ impl LlmProvider for AnthropicProvider {
     }
 
     fn estimate_tokens(&self, text: &str) -> u64 {
-        (text.len() as u64 + 2) / 3
+        (text.len() as u64).div_ceil(3)
     }
 }

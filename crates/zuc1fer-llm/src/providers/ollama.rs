@@ -5,6 +5,12 @@ pub struct OllamaProvider {
     base_url: String,
 }
 
+impl Default for OllamaProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OllamaProvider {
     pub fn new() -> Self {
         Self {
@@ -135,14 +141,21 @@ impl LlmProvider for OllamaProvider {
 
         use futures::StreamExt;
         let mut stream = response.bytes_stream();
+        let mut line_buf = crate::sse::LineBuffer::new();
         let mut text_buf = String::new();
         let mut usage = Usage::default();
 
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            let text = String::from_utf8_lossy(&chunk);
-
-            for line in text.lines() {
+        let mut stream_done = false;
+        while !stream_done {
+            let lines: Vec<String> = match stream.next().await {
+                Some(chunk) => line_buf.push(&chunk?),
+                None => {
+                    stream_done = true;
+                    line_buf.flush().into_iter().collect()
+                }
+            };
+            for line in lines {
+                let line = line.trim();
                 if let Ok(obj) = serde_json::from_str::<Value>(line) {
                     if let Some(content) = obj["message"]["content"].as_str() {
                         text_buf.push_str(content);
@@ -184,6 +197,6 @@ impl LlmProvider for OllamaProvider {
     }
 
     fn estimate_tokens(&self, text: &str) -> u64 {
-        (text.len() as u64 + 2) / 3
+        (text.len() as u64).div_ceil(3)
     }
 }
