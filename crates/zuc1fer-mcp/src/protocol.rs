@@ -56,6 +56,7 @@ pub enum JsonRpcMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ServerCapabilities {
     #[serde(default)]
     pub tools: Option<ToolsCapability>,
@@ -66,12 +67,14 @@ pub struct ServerCapabilities {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolsCapability {
     #[serde(default)]
     pub list_changed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourcesCapability {
     #[serde(default)]
     pub subscribe: bool,
@@ -80,12 +83,14 @@ pub struct ResourcesCapability {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PromptsCapability {
     #[serde(default)]
     pub list_changed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InitializeResult {
     pub protocol_version: String,
     pub capabilities: ServerCapabilities,
@@ -99,6 +104,7 @@ pub struct ServerInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolInfo {
     pub name: String,
     #[serde(default)]
@@ -118,6 +124,7 @@ pub struct CallToolRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CallToolResult {
     pub content: Vec<ToolContent>,
     #[serde(default)]

@@ -34,13 +34,10 @@ impl McpClient {
 
     async fn read_response(&mut self, expected_id: u64) -> anyhow::Result<JsonRpcResponse> {
         while let Some(msg) = self.transport.recv().await {
-            match msg {
-                JsonRpcMessage::Response(resp) => {
-                    if resp.id == expected_id {
-                        return Ok(resp);
-                    }
+            if let JsonRpcMessage::Response(resp) = msg {
+                if resp.id == expected_id {
+                    return Ok(resp);
                 }
-                _ => {}
             }
         }
         anyhow::bail!("Transport closed while waiting for response")
@@ -67,9 +64,9 @@ impl McpClient {
         let resp = self.request(
             "initialize",
             serde_json::json!({
-                "protocol_version": "2024-11-05",
+                "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "client_info": {
+                "clientInfo": {
                     "name": "zuc1fer",
                     "version": env!("CARGO_PKG_VERSION"),
                 }
@@ -85,7 +82,8 @@ impl McpClient {
             init.protocol_version,
         );
 
-        self.notify("initialized", Value::Null).await?;
+        self.notify("notifications/initialized", serde_json::json!({}))
+            .await?;
 
         Ok(())
     }
