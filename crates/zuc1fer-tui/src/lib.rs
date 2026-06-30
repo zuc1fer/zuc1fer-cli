@@ -540,7 +540,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     draw_header(frame, chunks[0], app);
 
     let status_text = if app.streaming {
-        " ● Streaming..."
+        " ● Streaming...  (Esc to cancel)"
     } else if app.status != "Ready" {
         &app.status
     } else {

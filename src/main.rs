@@ -120,6 +120,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new(&model);
+    let mut current_task: Option<tokio::task::JoinHandle<()>> = None;
 
     loop {
         while let Ok(prompt) = prompt_rx.try_recv() {
@@ -130,7 +131,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
 
             app.start_streaming();
 
-            rt.spawn(async move {
+            let handle = rt.spawn(async move {
                 let mut s = session_clone.lock().await;
                 let result = agent_clone.run(&mut s, &prompt).await;
                 match result {
@@ -145,6 +146,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                 }
                 let _ = done_tx_clone.send(true);
             });
+            current_task = Some(handle);
         }
         while let Ok(text) = text_rx.try_recv() {
             if text.starts_with("__TOKENS__:") {
@@ -231,6 +233,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
         while done_rx.try_recv().is_ok() {
             app.end_streaming();
             app.status = "Ready".into();
+            current_task = None;
         }
 
         terminal.draw(|f| zuc1fer_tui::draw(f, &app))?;
@@ -239,10 +242,20 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
             break;
         }
 
-        if crossterm::event::poll(std::time::Duration::from_millis(50))? {
+        let poll_ms = if app.streaming { 80 } else { 250 };
+        if crossterm::event::poll(std::time::Duration::from_millis(poll_ms))? {
             match crossterm::event::read()? {
                 crossterm::event::Event::Key(key) => {
                     if key.kind != crossterm::event::KeyEventKind::Press {
+                        continue;
+                    }
+                    if app.streaming && key.code == crossterm::event::KeyCode::Esc {
+                        if let Some(handle) = current_task.take() {
+                            handle.abort();
+                        }
+                        app.end_streaming();
+                        app.status = "Ready".into();
+                        app.add_system_message("Request cancelled.".into());
                         continue;
                     }
                     if key.code == crossterm::event::KeyCode::Enter
