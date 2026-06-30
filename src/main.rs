@@ -1,8 +1,8 @@
+use std::sync::Arc;
 use zuc1fer_core::agent::{Agent, AgentEvent, ApprovalDecision, Approver};
 use zuc1fer_core::config::Config;
 use zuc1fer_core::session::Session;
 use zuc1fer_core::session_store::SessionStore;
-use std::sync::Arc;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -37,9 +37,7 @@ struct CliApprover;
 #[async_trait::async_trait]
 impl Approver for CliApprover {
     async fn approve(&self, tool: &str, detail: &str) -> ApprovalDecision {
-        let prompt = format!(
-            "\nApprove `{tool}`? {detail}\n  [y]es / [n]o / [a]ll this session: "
-        );
+        let prompt = format!("\nApprove `{tool}`? {detail}\n  [y]es / [n]o / [a]ll this session: ");
         let line = tokio::task::spawn_blocking(move || {
             use std::io::Write;
             print!("{prompt}");
@@ -60,7 +58,9 @@ impl Approver for CliApprover {
 
 pub fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(std::env::var("ZUC1FER_LOG").unwrap_or_else(|_| "info,tantivy=warn,notify=warn".into()))
+        .with_env_filter(
+            std::env::var("ZUC1FER_LOG").unwrap_or_else(|_| "info,tantivy=warn,notify=warn".into()),
+        )
         .init();
 
     let args: Vec<String> = std::env::args().collect();
@@ -119,9 +119,12 @@ pub fn main() -> anyhow::Result<()> {
 
 fn run_tui(args: &[String]) -> anyhow::Result<()> {
     use crossterm::{
+        event::{DisableMouseCapture, EnableMouseCapture},
         execute,
-        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen, Clear, ClearType},
-        event::{EnableMouseCapture, DisableMouseCapture},
+        terminal::{
+            disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
+            LeaveAlternateScreen,
+        },
     };
     use ratatui::backend::CrosstermBackend;
     use ratatui::Terminal;
@@ -153,10 +156,10 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
     let (prompt_tx, mut prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let (approval_tx, mut approval_rx) =
-        tokio::sync::mpsc::unbounded_channel::<ApprovalRequest>();
+    let (approval_tx, mut approval_rx) = tokio::sync::mpsc::unbounded_channel::<ApprovalRequest>();
 
-    let agent = rt.block_on(Agent::new(config, working_dir.clone()))?
+    let agent = rt
+        .block_on(Agent::new(config, working_dir.clone()))?
         .with_tui(event_tx.clone())
         .with_session_store(Arc::new(open_store()?))
         .with_approver(Arc::new(TuiApprover { tx: approval_tx }));
@@ -169,7 +172,12 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
 
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    execute!(stdout, Clear(ClearType::All), EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(
+        stdout,
+        Clear(ClearType::All),
+        EnterAlternateScreen,
+        EnableMouseCapture
+    )?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -315,7 +323,10 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                                     });
                                     app.model = model;
                                     app.update_cost();
-                                    app.add_system_message(format!("Switched to model: {}", model_name));
+                                    app.add_system_message(format!(
+                                        "Switched to model: {}",
+                                        model_name
+                                    ));
                                 } else if let Some(sid) = cmd.strip_prefix("__SESSION_SELECT__:") {
                                     app.add_system_message(format!("Session selected: {sid}. Use 'zuc1fer session resume {sid}' to resume."));
                                 } else {
@@ -345,11 +356,16 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                 }
                 _ => {}
             }
-            }
+        }
     }
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), Clear(ClearType::All), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(
+        terminal.backend_mut(),
+        Clear(ClearType::All),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
 
     Ok(())
 }
@@ -388,7 +404,8 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
     }
 
     let rt = tokio::runtime::Runtime::new()?;
-    let agent = rt.block_on(Agent::new(config, working_dir.clone()))?
+    let agent = rt
+        .block_on(Agent::new(config, working_dir.clone()))?
         .with_session_store(Arc::new(open_store()?))
         .with_approver(Arc::new(CliApprover));
     let mut session = Session::new(
@@ -530,7 +547,10 @@ fn list_sessions() -> anyhow::Result<()> {
         println!("No saved sessions.");
         return Ok(());
     }
-    println!("{:<36} {:<30} {:>6} {:>8}  UPDATED", "ID", "MODEL", "MSGS", "TOKENS");
+    println!(
+        "{:<36} {:<30} {:>6} {:>8}  UPDATED",
+        "ID", "MODEL", "MSGS", "TOKENS"
+    );
     for s in &sessions {
         println!(
             "{:<36} {:<30} {:>6} {:>8}  {}",
@@ -555,9 +575,16 @@ fn resume_session(id: &str) -> anyhow::Result<()> {
     };
     let config = Config::load()?;
     let rt = tokio::runtime::Runtime::new()?;
-    let agent = rt.block_on(Agent::new(config, std::env::current_dir()?))?.with_session_store(Arc::new(store));
+    let agent = rt
+        .block_on(Agent::new(config, std::env::current_dir()?))?
+        .with_session_store(Arc::new(store));
 
-    println!("Resumed session: {} ({} messages, {} tokens)", id, session.messages.len(), session.total_tokens);
+    println!(
+        "Resumed session: {} ({} messages, {} tokens)",
+        id,
+        session.messages.len(),
+        session.total_tokens
+    );
 
     let mut session = session;
     loop {
@@ -568,11 +595,17 @@ fn resume_session(id: &str) -> anyhow::Result<()> {
         std::io::stdin().read_line(&mut input)?;
         let input = input.trim().to_string();
 
-        if input.is_empty() { continue; }
-        if input == "/quit" || input == "/exit" || input == "/q" { break; }
+        if input.is_empty() {
+            continue;
+        }
+        if input == "/quit" || input == "/exit" || input == "/q" {
+            break;
+        }
 
         let result = rt.block_on(agent.run(&mut session, &input));
-        if let Err(e) = result { eprintln!("Error: {e}") }
+        if let Err(e) = result {
+            eprintln!("Error: {e}")
+        }
     }
     Ok(())
 }
@@ -621,7 +654,10 @@ fn handle_palette_command(app: &mut zuc1fer_tui::App, cmd: &str) {
             app.model_picker_selection = 0;
         }
         "/help" => {
-            app.add_system_message("Commands: /model /models /session /clear /quit /help /config /toggle-sidebar".into());
+            app.add_system_message(
+                "Commands: /model /models /session /clear /quit /help /config /toggle-sidebar"
+                    .into(),
+            );
         }
         "/config" => {
             let dir = zuc1fer_core::default_config_dir().unwrap_or_default();

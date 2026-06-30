@@ -8,7 +8,8 @@ impl Tool for WebFetch {
         ToolDef {
             name: "webfetch".into(),
             description: "Fetches content from a specified URL and returns it as plain text. \
-                Use this to read documentation, API references, or any web content.".into(),
+                Use this to read documentation, API references, or any web content."
+                .into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -32,9 +33,7 @@ impl Tool for WebFetch {
     }
 
     async fn execute(&self, call: &ToolCall, _ctx: &ToolContext) -> anyhow::Result<ToolResult> {
-        let url = call.arguments["url"]
-            .as_str()
-            .unwrap_or("");
+        let url = call.arguments["url"].as_str().unwrap_or("");
         if url.is_empty() {
             return Ok(ToolResult::error(&call.id, "URL is required"));
         }
@@ -76,8 +75,10 @@ impl Tool for WebFetch {
                 let output = if content_type.contains("text/html") {
                     let rendered = html2text::from_read(body.as_bytes(), 100);
                     truncate_chars(&rendered, 20_000)
-                } else if content_type.contains("image/") || content_type.contains("video/")
-                    || content_type.contains("audio/") || content_type.contains("application/pdf")
+                } else if content_type.contains("image/")
+                    || content_type.contains("video/")
+                    || content_type.contains("audio/")
+                    || content_type.contains("application/pdf")
                     || content_type.contains("application/octet-stream")
                 {
                     format!("[Binary content: {}]", content_type)

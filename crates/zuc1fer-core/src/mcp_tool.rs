@@ -12,7 +12,11 @@ pub struct McpTool {
 
 impl McpTool {
     pub fn new(bridge: Arc<McpBridge>, tool_info: ToolInfo, server_name: &str) -> Self {
-        let tool_name = format!("mcp__{}_{}", server_name.replace(['-', ' '], "_"), tool_info.name);
+        let tool_name = format!(
+            "mcp__{}_{}",
+            server_name.replace(['-', ' '], "_"),
+            tool_info.name
+        );
         Self {
             bridge,
             tool_info,
@@ -32,7 +36,11 @@ impl Tool for McpTool {
     }
 
     async fn execute(&self, call: &ToolCall, _ctx: &ToolContext) -> anyhow::Result<ToolResult> {
-        match self.bridge.execute(&self.tool_info.name, call.arguments.clone()).await {
+        match self
+            .bridge
+            .execute(&self.tool_info.name, call.arguments.clone())
+            .await
+        {
             Ok(result) => {
                 let content: String = result
                     .content

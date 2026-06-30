@@ -49,7 +49,10 @@ impl Tool for ReadTool {
             }
             return Ok(ToolResult::error(
                 &call.id,
-                format!("File not found: {}. Try with forward slashes in the path.", path.display()),
+                format!(
+                    "File not found: {}. Try with forward slashes in the path.",
+                    path.display()
+                ),
             ));
         }
 
@@ -65,10 +68,7 @@ impl Tool for ReadTool {
                     format!("{}{}", e.file_name().to_string_lossy(), ft)
                 })
                 .collect();
-            return Ok(ToolResult::success(
-                &call.id,
-                entries.join("\n"),
-            ));
+            return Ok(ToolResult::success(&call.id, entries.join("\n")));
         }
 
         self.read_file(&call.id, &path, call)

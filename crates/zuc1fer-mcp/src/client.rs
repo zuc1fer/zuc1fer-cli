@@ -61,17 +61,19 @@ impl McpClient {
     }
 
     pub async fn initialize(&mut self) -> anyhow::Result<()> {
-        let resp = self.request(
-            "initialize",
-            serde_json::json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {
-                    "name": "zuc1fer",
-                    "version": env!("CARGO_PKG_VERSION"),
-                }
-            }),
-        ).await?;
+        let resp = self
+            .request(
+                "initialize",
+                serde_json::json!({
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {
+                        "name": "zuc1fer",
+                        "version": env!("CARGO_PKG_VERSION"),
+                    }
+                }),
+            )
+            .await?;
 
         let init: InitializeResult = serde_json::from_value(resp.result)?;
         self.server_info = init.server_info;
@@ -96,14 +98,20 @@ impl McpClient {
         Ok(list.tools)
     }
 
-    pub async fn call_tool(&mut self, name: &str, arguments: Value) -> anyhow::Result<CallToolResult> {
-        let resp = self.request(
-            "tools/call",
-            serde_json::json!({
-                "name": name,
-                "arguments": arguments,
-            }),
-        ).await?;
+    pub async fn call_tool(
+        &mut self,
+        name: &str,
+        arguments: Value,
+    ) -> anyhow::Result<CallToolResult> {
+        let resp = self
+            .request(
+                "tools/call",
+                serde_json::json!({
+                    "name": name,
+                    "arguments": arguments,
+                }),
+            )
+            .await?;
 
         let result: CallToolResult = serde_json::from_value(resp.result)?;
         Ok(result)

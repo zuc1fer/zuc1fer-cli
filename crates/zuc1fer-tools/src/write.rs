@@ -49,31 +49,53 @@ impl Tool for WriteTool {
         }
 
         if ctx.safe_mode {
-            let canonical_workspace = ctx.working_dir.canonicalize().unwrap_or_else(|_| ctx.working_dir.clone());
+            let canonical_workspace = ctx
+                .working_dir
+                .canonicalize()
+                .unwrap_or_else(|_| ctx.working_dir.clone());
             if let Ok(canonical_target) = path.canonicalize() {
                 if !canonical_target.starts_with(&canonical_workspace) {
                     return Ok(ToolResult::error(
                         &call.id,
-                        format!("Safe mode: blocked write outside workspace: {}", path.display()),
+                        format!(
+                            "Safe mode: blocked write outside workspace: {}",
+                            path.display()
+                        ),
                     ));
                 }
             }
         }
 
-        let has_content_key = call.arguments.get("content").map(|v| v.is_string()).unwrap_or(false)
-            || call.arguments.get("content_b64").map(|v| v.is_string()).unwrap_or(false);
+        let has_content_key = call
+            .arguments
+            .get("content")
+            .map(|v| v.is_string())
+            .unwrap_or(false)
+            || call
+                .arguments
+                .get("content_b64")
+                .map(|v| v.is_string())
+                .unwrap_or(false);
         let mut content = call.arguments["content"].as_str().unwrap_or("").to_string();
         if let Some(b64) = call.arguments["content_b64"].as_str() {
             if !b64.is_empty() {
                 use base64::Engine;
                 match base64::engine::general_purpose::STANDARD.decode(b64) {
                     Ok(decoded) => content = String::from_utf8_lossy(&decoded).to_string(),
-                    Err(e) => return Ok(ToolResult::error(&call.id, format!("Base64 decode failed: {e}"))),
+                    Err(e) => {
+                        return Ok(ToolResult::error(
+                            &call.id,
+                            format!("Base64 decode failed: {e}"),
+                        ))
+                    }
                 }
             }
         }
         if content.is_empty() && !has_content_key {
-            return Ok(ToolResult::error(&call.id, "No content or content_b64 provided"));
+            return Ok(ToolResult::error(
+                &call.id,
+                "No content or content_b64 provided",
+            ));
         }
 
         if let Some(parent) = path.parent() {
@@ -110,9 +132,15 @@ impl Tool for WriteTool {
         }
 
         if existed {
-            Ok(ToolResult::success(&call.id, format!("File overwritten (verified): {}", path.display())))
+            Ok(ToolResult::success(
+                &call.id,
+                format!("File overwritten (verified): {}", path.display()),
+            ))
         } else {
-            Ok(ToolResult::success(&call.id, format!("File created (verified): {}", path.display())))
+            Ok(ToolResult::success(
+                &call.id,
+                format!("File created (verified): {}", path.display()),
+            ))
         }
     }
 }

@@ -74,12 +74,14 @@ pub enum ContentBlock {
 
 impl ContentBlock {
     pub fn text(text: impl Into<String>) -> Self {
-        Self::Text {
-            text: text.into(),
-        }
+        Self::Text { text: text.into() }
     }
 
-    pub fn tool_use(id: impl Into<String>, name: impl Into<String>, input: serde_json::Value) -> Self {
+    pub fn tool_use(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        input: serde_json::Value,
+    ) -> Self {
         Self::ToolUse {
             id: id.into(),
             name: name.into(),
@@ -118,14 +120,34 @@ pub struct ChatRequest {
 
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
-    TextDelta { text: String },
-    ReasoningDelta { text: String },
-    TextDone { text: String },
-    ToolUseStart { id: String, name: String },
-    ToolUseDelta { id: String, input_json: String },
-    ToolUseDone { id: String, name: String, input: serde_json::Value },
-    Error { message: String },
-    Done { usage: Usage },
+    TextDelta {
+        text: String,
+    },
+    ReasoningDelta {
+        text: String,
+    },
+    TextDone {
+        text: String,
+    },
+    ToolUseStart {
+        id: String,
+        name: String,
+    },
+    ToolUseDelta {
+        id: String,
+        input_json: String,
+    },
+    ToolUseDone {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    Error {
+        message: String,
+    },
+    Done {
+        usage: Usage,
+    },
 }
 
 #[derive(Debug, Clone, Default)]

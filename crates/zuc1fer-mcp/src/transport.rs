@@ -19,9 +19,13 @@ impl StdioTransport {
             .stderr(Stdio::inherit())
             .spawn()?;
 
-        let stdout = child.stdout.take()
+        let stdout = child
+            .stdout
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout"))?;
-        let stdin = child.stdin.take()
+        let stdin = child
+            .stdin
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to capture stdin"))?;
 
         let (response_tx, response_rx) = mpsc::unbounded_channel::<JsonRpcMessage>();

@@ -39,7 +39,9 @@ impl LspClient {
         let conn = self.get_or_start_connection(&lang).await?;
         self.ensure_open(conn.clone(), file_path).await?;
         let file_uri = path_to_uri(file_path);
-        let uri: Uri = file_uri.parse().map_err(|e| anyhow::anyhow!("invalid uri: {e}"))?;
+        let uri: Uri = file_uri
+            .parse()
+            .map_err(|e| anyhow::anyhow!("invalid uri: {e}"))?;
 
         let params = GotoDefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
@@ -51,7 +53,11 @@ impl LspClient {
         };
 
         let response = self
-            .send_request(conn, "textDocument/definition", serde_json::to_value(&params)?)
+            .send_request(
+                conn,
+                "textDocument/definition",
+                serde_json::to_value(&params)?,
+            )
             .await?;
 
         if response.is_null() {
@@ -85,7 +91,9 @@ impl LspClient {
         let conn = self.get_or_start_connection(&lang).await?;
         self.ensure_open(conn.clone(), file_path).await?;
         let file_uri = path_to_uri(file_path);
-        let uri: Uri = file_uri.parse().map_err(|e| anyhow::anyhow!("invalid uri: {e}"))?;
+        let uri: Uri = file_uri
+            .parse()
+            .map_err(|e| anyhow::anyhow!("invalid uri: {e}"))?;
 
         let params = ReferenceParams {
             text_document_position: TextDocumentPositionParams {
@@ -94,11 +102,17 @@ impl LspClient {
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
-            context: ReferenceContext { include_declaration: true },
+            context: ReferenceContext {
+                include_declaration: true,
+            },
         };
 
         let response = self
-            .send_request(conn, "textDocument/references", serde_json::to_value(&params)?)
+            .send_request(
+                conn,
+                "textDocument/references",
+                serde_json::to_value(&params)?,
+            )
             .await?;
 
         if response.is_null() {
@@ -123,7 +137,9 @@ impl LspClient {
         let conn = self.get_or_start_connection(&lang).await?;
         self.ensure_open(conn.clone(), file_path).await?;
         let file_uri = path_to_uri(file_path);
-        let uri: Uri = file_uri.parse().map_err(|e| anyhow::anyhow!("invalid uri: {e}"))?;
+        let uri: Uri = file_uri
+            .parse()
+            .map_err(|e| anyhow::anyhow!("invalid uri: {e}"))?;
 
         let params = HoverParams {
             text_document_position_params: TextDocumentPositionParams {
@@ -152,7 +168,9 @@ impl LspClient {
         let lang = language_from_extension(file_path);
         let conn = self.get_or_start_connection(&lang).await?;
         let file_uri = path_to_uri(file_path);
-        let uri: Uri = file_uri.parse().map_err(|e| anyhow::anyhow!("invalid uri: {e}"))?;
+        let uri: Uri = file_uri
+            .parse()
+            .map_err(|e| anyhow::anyhow!("invalid uri: {e}"))?;
 
         self.ensure_open(conn.clone(), file_path).await?;
 
@@ -174,7 +192,8 @@ impl LspClient {
 
         match response {
             Ok(val) => {
-                let result: Option<RelatedFullDocumentDiagnosticReport> = serde_json::from_value(val).ok();
+                let result: Option<RelatedFullDocumentDiagnosticReport> =
+                    serde_json::from_value(val).ok();
                 match result {
                     Some(report) => Ok(report
                         .full_document_diagnostic_report
@@ -200,7 +219,11 @@ impl LspClient {
                     version: None,
                 };
                 let _ = self
-                    .send_notification(conn, "textDocument/publishDiagnostics", serde_json::to_value(&params)?)
+                    .send_notification(
+                        conn,
+                        "textDocument/publishDiagnostics",
+                        serde_json::to_value(&params)?,
+                    )
                     .await;
                 Ok(vec![])
             }
@@ -221,7 +244,9 @@ impl LspClient {
 
     async fn did_open(&self, conn: Arc<LspConnection>, file_path: &str) -> anyhow::Result<()> {
         let file_uri = path_to_uri(file_path);
-        let uri: Uri = file_uri.parse().map_err(|e| anyhow::anyhow!("invalid uri: {e}"))?;
+        let uri: Uri = file_uri
+            .parse()
+            .map_err(|e| anyhow::anyhow!("invalid uri: {e}"))?;
         let content = std::fs::read_to_string(file_path).unwrap_or_default();
 
         let params = DidOpenTextDocumentParams {
@@ -312,10 +337,7 @@ impl LspClient {
     }
 }
 
-async fn start_lsp_server(
-    language: &str,
-    working_dir: &PathBuf,
-) -> anyhow::Result<LspConnection> {
+async fn start_lsp_server(language: &str, working_dir: &PathBuf) -> anyhow::Result<LspConnection> {
     let (program, args) = server_command(language);
     if program.is_empty() {
         anyhow::bail!(
@@ -365,7 +387,10 @@ async fn start_lsp_server(
             }
 
             let mut body = vec![0u8; content_length];
-            if tokio::io::AsyncReadExt::read_exact(&mut reader, &mut body).await.is_err() {
+            if tokio::io::AsyncReadExt::read_exact(&mut reader, &mut body)
+                .await
+                .is_err()
+            {
                 return;
             }
 
@@ -413,7 +438,9 @@ async fn start_lsp_server(
 
     let response = send_raw_request(conn.clone(), "initialize", init_params).await?;
     if response.get("error").is_some() {
-        let msg = response["error"]["message"].as_str().unwrap_or("initialize failed");
+        let msg = response["error"]["message"]
+            .as_str()
+            .unwrap_or("initialize failed");
         anyhow::bail!("LSP initialize failed: {msg}");
     }
 
@@ -497,10 +524,7 @@ fn server_command(language: &str) -> (String, Vec<String>) {
     match language {
         "rust" => ("rust-analyzer".into(), vec![]),
         "python" => ("pyright-langserver".into(), vec!["--stdio".into()]),
-        "typescript" => (
-            "typescript-language-server".into(),
-            vec!["--stdio".into()],
-        ),
+        "typescript" => ("typescript-language-server".into(), vec!["--stdio".into()]),
         "go" => ("gopls".into(), vec![]),
         _ => ("".into(), vec![]),
     }
@@ -522,9 +546,7 @@ fn format_location(loc: &Location) -> String {
 fn format_location_link(link: &LocationLink) -> String {
     format!(
         "{}:{}:{}",
-        link.target_uri
-            .to_string()
-            .trim_start_matches("file:///"),
+        link.target_uri.to_string().trim_start_matches("file:///"),
         link.target_selection_range.start.line + 1,
         link.target_selection_range.start.character + 1,
     )

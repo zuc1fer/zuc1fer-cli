@@ -102,7 +102,9 @@ impl Tool for LspTool {
             },
             _ => Ok(ToolResult::error(
                 &call.id,
-                format!("Unknown action: {action}. Use: definition, references, hover, diagnostics"),
+                format!(
+                    "Unknown action: {action}. Use: definition, references, hover, diagnostics"
+                ),
             )),
         }
     }

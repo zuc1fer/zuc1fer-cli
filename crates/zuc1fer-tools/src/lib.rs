@@ -74,11 +74,7 @@ pub struct ToolContext {
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
     fn definition(&self) -> ToolDef;
-    async fn execute(
-        &self,
-        call: &ToolCall,
-        ctx: &ToolContext,
-    ) -> anyhow::Result<ToolResult>;
+    async fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> anyhow::Result<ToolResult>;
 }
 
 pub fn try_fuzzy_path(path_str: &str) -> Option<std::path::PathBuf> {

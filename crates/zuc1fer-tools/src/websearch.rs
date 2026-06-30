@@ -39,10 +39,7 @@ impl Tool for WebSearch {
             ));
         }
 
-        let limit = call.arguments["limit"]
-            .as_u64()
-            .unwrap_or(5)
-            .clamp(1, 20);
+        let limit = call.arguments["limit"].as_u64().unwrap_or(5).clamp(1, 20);
 
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(20))
@@ -62,7 +59,12 @@ impl Tool for WebSearch {
             .await
         {
             Ok(r) => r,
-            Err(e) => return Ok(ToolResult::error(&call.id, format!("Search request failed: {e}"))),
+            Err(e) => {
+                return Ok(ToolResult::error(
+                    &call.id,
+                    format!("Search request failed: {e}"),
+                ))
+            }
         };
 
         if !resp.status().is_success() {
@@ -94,7 +96,13 @@ impl Tool for WebSearch {
             let title = r["title"].as_str().unwrap_or("(no title)");
             let url = r["url"].as_str().unwrap_or("");
             let content = r["content"].as_str().unwrap_or("");
-            output.push_str(&format!("{}. {}\n   URL: {}\n   {}\n\n", i + 1, title, url, content));
+            output.push_str(&format!(
+                "{}. {}\n   URL: {}\n   {}\n\n",
+                i + 1,
+                title,
+                url,
+                content
+            ));
         }
 
         Ok(ToolResult::success(&call.id, output))

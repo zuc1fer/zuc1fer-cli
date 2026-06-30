@@ -57,7 +57,10 @@ impl Tool for EditTool {
         let replace_all = call.arguments["replaceAll"].as_bool().unwrap_or(false);
 
         if old == new {
-            return Ok(ToolResult::error(&call.id, "oldString and newString are identical"));
+            return Ok(ToolResult::error(
+                &call.id,
+                "oldString and newString are identical",
+            ));
         }
 
         let content = std::fs::read_to_string(&path)?;

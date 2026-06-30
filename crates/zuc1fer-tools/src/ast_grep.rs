@@ -44,9 +44,7 @@ impl AstGrepTool {
             if let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) {
                 if entry["type"].as_str() == Some("Match") {
                     let path = entry["file"].as_str().unwrap_or("unknown");
-                    let line_num = entry["range"]["start"]["line"]
-                        .as_u64()
-                        .unwrap_or(0);
+                    let line_num = entry["range"]["start"]["line"].as_u64().unwrap_or(0);
                     let text = entry["text"].as_str().unwrap_or("").trim_end();
                     results.push(format!("{path}:{line_num}: {text}"));
                 }

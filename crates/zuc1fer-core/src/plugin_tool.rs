@@ -81,7 +81,9 @@ impl Tool for PluginTool {
 
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&stdout) {
                     let content = parsed["content"].as_str().unwrap_or(&stdout).to_string();
-                    let is_error = parsed["is_error"].as_bool().unwrap_or(!output.status.success());
+                    let is_error = parsed["is_error"]
+                        .as_bool()
+                        .unwrap_or(!output.status.success());
                     if is_error {
                         Ok(ToolResult::error(&call.id, content))
                     } else {
@@ -102,10 +104,10 @@ impl Tool for PluginTool {
                 }
             }
             Ok(Err(e)) => Ok(ToolResult::error(&call.id, format!("Plugin error: {e}"))),
-            Err(_) => Ok(ToolResult::error(&call.id, format!(
-                "Plugin timed out after {}ms",
-                self.timeout_ms
-            ))),
+            Err(_) => Ok(ToolResult::error(
+                &call.id,
+                format!("Plugin timed out after {}ms", self.timeout_ms),
+            )),
         }
     }
 }
