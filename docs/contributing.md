@@ -27,15 +27,15 @@ chore: update dependencies
 
 ## Adding a Provider
 
-1. Create `crates/zuc1fer-llm/src/providers/<name>.rs`
+1. Create `crates/ophis-llm/src/providers/<name>.rs`
 2. Implement `LlmProvider` trait
-3. Register in `crates/zuc1fer-llm/src/providers/mod.rs`
-4. Add to `Config::default()` in `crates/zuc1fer-core/src/config.rs`
-5. Add to `Agent::new()` provider registry in `crates/zuc1fer-core/src/agent.rs`
+3. Register in `crates/ophis-llm/src/providers/mod.rs`
+4. Add to `Config::default()` in `crates/ophis-core/src/config.rs`
+5. Add to `Agent::new()` provider registry in `crates/ophis-core/src/agent.rs`
 
 ## Adding a Tool
 
-1. Create `crates/zuc1fer-tools/src/<name>.rs`
+1. Create `crates/ophis-tools/src/<name>.rs`
 2. Implement `Tool` trait (definition + execute)
 3. Register in `ToolRegistry::register_builtins()`
 
@@ -43,6 +43,6 @@ chore: update dependencies
 
 ```bash
 cargo test
-cargo test --package zuc1fer-tools
-cargo test --package zuc1fer-core
+cargo test --package ophis-tools
+cargo test --package ophis-core
 ```

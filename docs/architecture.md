@@ -4,12 +4,12 @@
 
 ```
 src/main.rs (CLI + TUI binary)
-  ├── zuc1fer-core (agent, config, sessions, code index, RepoMap, LSP)
-  │     ├── zuc1fer-tools (tool implementations + registry)
-  │     ├── zuc1fer-llm (provider abstraction)
+  ├── ophis-core (agent, config, sessions, code index, RepoMap, LSP)
+  │     ├── ophis-tools (tool implementations + registry)
+  │     ├── ophis-llm (provider abstraction)
   │     │     └── providers/ (deepseek, anthropic, openai, openrouter, ollama)
-  │     └── zuc1fer-mcp (MCP client)
-  └── zuc1fer-tui (ratatui terminal UI)
+  │     └── ophis-mcp (MCP client)
+  └── ophis-tui (ratatui terminal UI)
 ```
 
 ## Agent Loop
@@ -56,4 +56,4 @@ Sessions are plain Rust structs (serde-serializable). Ready for SQLite persisten
 
 ## Config
 
-`~/.config/zuc1fer/config.toml` — TOML format, auto-created on first run. Supports per-provider API keys and base URL overrides (useful for proxies and OpenRouter).
+`~/.config/ophis/config.toml` — TOML format, auto-created on first run. Supports per-provider API keys and base URL overrides (useful for proxies and OpenRouter).

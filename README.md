@@ -1,4 +1,4 @@
-# zuc1fer
+# ophis
 
 **A fast, multi-model CLI coding agent. Single Rust binary, structural + semantic search, MCP and LSP built in.**
 
@@ -25,8 +25,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ### Clone & Build
 
 ```bash
-git clone https://github.com/zuc1fer/zuc1fer-cli
-cd zuc1fer-cli
+git clone https://github.com/ophis
+cd ophis-cli
 cargo build --release
 ```
 
@@ -40,7 +40,7 @@ export ANTHROPIC_API_KEY="sk-ant-your-key"
 export OPENAI_API_KEY="sk-your-key"
 ```
 
-Or create `~/.config/zuc1fer/config.toml`:
+Or create `~/.config/ophis/config.toml`:
 
 ```toml
 model = "deepseek/deepseek-chat"
@@ -81,14 +81,14 @@ cargo run -- config
 ## Architecture
 
 ```
-zuc1fer/
+ophis/
 ├── src/main.rs              CLI + TUI entry point
 ├── crates/
-│   ├── zuc1fer-core/        Agent loop, config, sessions, code index, RepoMap, LSP
-│   ├── zuc1fer-tools/       bash, read, write, edit, glob, grep, ast_grep, git, web, semantic
-│   ├── zuc1fer-llm/         DeepSeek, Anthropic, OpenAI, OpenRouter, Ollama providers
-│   ├── zuc1fer-mcp/         MCP client (stdio JSON-RPC)
-│   └── zuc1fer-tui/         Ratatui terminal UI
+│   ├── ophis-core/        Agent loop, config, sessions, code index, RepoMap, LSP
+│   ├── ophis-tools/       bash, read, write, edit, glob, grep, ast_grep, git, web, semantic
+│   ├── ophis-llm/         DeepSeek, Anthropic, OpenAI, OpenRouter, Ollama providers
+│   ├── ophis-mcp/         MCP client (stdio JSON-RPC)
+│   └── ophis-tui/         Ratatui terminal UI
 └── Cargo.toml               Rust workspace
 ```
 
