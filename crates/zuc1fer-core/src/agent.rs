@@ -47,10 +47,24 @@ const SYSTEM_PROMPT: &str = r#"You are zuc1fer, a fast and capable CLI coding ag
 Current working directory: {working_dir}
 "#;
 
+#[derive(Debug, Clone)]
+pub enum AgentEvent {
+    Text(String),
+    Reasoning(String),
+    Tool(String),
+    Status(String),
+    Error(String),
+    Tokens { input: u64, output: u64 },
+    TurnEnd,
+    Done,
+    Repo(Vec<(String, f64)>),
+    Mcp(Vec<(String, bool)>),
+    Models(Vec<String>),
+    Sessions(Vec<crate::session_store::SessionMeta>),
+}
+
 pub struct TuiOutput {
-    pub text_tx: tokio::sync::mpsc::UnboundedSender<String>,
-    pub debug_tx: tokio::sync::mpsc::UnboundedSender<String>,
-    pub turn_tx: tokio::sync::mpsc::UnboundedSender<()>,
+    pub tx: tokio::sync::mpsc::UnboundedSender<AgentEvent>,
 }
 
 pub struct Agent {
@@ -206,8 +220,8 @@ impl Agent {
         })
     }
 
-    pub fn with_tui(mut self, text_tx: tokio::sync::mpsc::UnboundedSender<String>, debug_tx: tokio::sync::mpsc::UnboundedSender<String>, turn_tx: tokio::sync::mpsc::UnboundedSender<()>) -> Self {
-        self.tui = Some(TuiOutput { text_tx, debug_tx, turn_tx });
+    pub fn with_tui(mut self, tx: tokio::sync::mpsc::UnboundedSender<AgentEvent>) -> Self {
+        self.tui = Some(TuiOutput { tx });
         self
     }
 
@@ -218,7 +232,7 @@ impl Agent {
 
     fn emit(&self, text: &str) {
         if let Some(ref tui) = self.tui {
-            let _ = tui.text_tx.send(text.to_string());
+            let _ = tui.tx.send(AgentEvent::Text(text.to_string()));
         } else {
             print!("{text}");
         }
@@ -226,23 +240,39 @@ impl Agent {
 
     fn emitln(&self, text: &str) {
         if let Some(ref tui) = self.tui {
-            let _ = tui.text_tx.send(format!("{text}\n"));
+            let _ = tui.tx.send(AgentEvent::Text(format!("{text}\n")));
         } else {
             println!("{text}");
         }
     }
 
-    fn emit_debug(&self, text: &str) {
+    fn emit_reasoning(&self, text: &str) {
         if let Some(ref tui) = self.tui {
-            let _ = tui.debug_tx.send(text.to_string());
+            let _ = tui.tx.send(AgentEvent::Reasoning(text.to_string()));
         } else {
             eprint!("{text}");
         }
     }
 
-    fn emitln_debug(&self, text: &str) {
+    fn emit_tool(&self, text: &str) {
         if let Some(ref tui) = self.tui {
-            let _ = tui.debug_tx.send(format!("{text}\n"));
+            let _ = tui.tx.send(AgentEvent::Tool(text.to_string()));
+        } else {
+            eprintln!("{text}");
+        }
+    }
+
+    fn emit_status(&self, text: &str) {
+        if let Some(ref tui) = self.tui {
+            let _ = tui.tx.send(AgentEvent::Status(text.to_string()));
+        } else {
+            eprintln!("{text}");
+        }
+    }
+
+    fn emit_error(&self, text: &str) {
+        if let Some(ref tui) = self.tui {
+            let _ = tui.tx.send(AgentEvent::Error(text.to_string()));
         } else {
             eprintln!("{text}");
         }
@@ -253,7 +283,7 @@ impl Agent {
     }
 
     fn emit_repomap(&self) {
-        if let Some(ref repomap) = self.repomap {
+        if let (Some(repomap), Some(tui)) = (&self.repomap, &self.tui) {
             let files: Vec<(String, f64)> = repomap
                 .file_rankings
                 .iter()
@@ -268,56 +298,28 @@ impl Agent {
                     )
                 })
                 .collect();
-
-            let json = serde_json::json!({
-                "files": files.iter().map(|(path, score)| {
-                    serde_json::json!([path, score])
-                }).collect::<Vec<_>>()
-            });
-            let msg = format!("__REPO__:{}", serde_json::to_string(&json).unwrap_or_default());
-            if let Some(ref tui) = self.tui {
-                let _ = tui.debug_tx.send(msg);
-            }
+            let _ = tui.tx.send(AgentEvent::Repo(files));
         }
     }
 
     fn emit_mcp_status(&self) {
-        let json = serde_json::json!({
-            "servers": self.mcp_status.iter().map(|(name, connected)| {
-                serde_json::json!([name, connected])
-            }).collect::<Vec<_>>()
-        });
-        let msg = format!("__MCP__:{}", serde_json::to_string(&json).unwrap_or_default());
         if let Some(ref tui) = self.tui {
-            let _ = tui.debug_tx.send(msg);
+            let _ = tui.tx.send(AgentEvent::Mcp(self.mcp_status.clone()));
         }
     }
 
     fn emit_models(&self) {
-        let models = self.provider_registry.list_models();
-        let json = serde_json::json!({ "models": models });
-        let msg = format!("__MODELS__:{}", serde_json::to_string(&json).unwrap_or_default());
         if let Some(ref tui) = self.tui {
-            let _ = tui.debug_tx.send(msg);
+            let _ = tui
+                .tx
+                .send(AgentEvent::Models(self.provider_registry.list_models()));
         }
     }
 
     fn emit_sessions(&self) {
-        if let Some(ref store) = self.session_store {
+        if let (Some(store), Some(tui)) = (&self.session_store, &self.tui) {
             if let Ok(sessions) = store.list() {
-                let json: Vec<serde_json::Value> = sessions.iter().map(|s| {
-                    serde_json::json!({
-                        "id": s.id,
-                        "model": s.model,
-                        "msgs": s.message_count,
-                        "tokens": s.total_tokens,
-                        "updated": s.updated_at,
-                    })
-                }).collect();
-                let msg = format!("__SESSIONS__:{}", serde_json::to_string(&json).unwrap_or_default());
-                if let Some(ref tui) = self.tui {
-                    let _ = tui.debug_tx.send(msg);
-                }
+                let _ = tui.tx.send(AgentEvent::Sessions(sessions));
             }
         }
     }
@@ -560,8 +562,8 @@ impl Agent {
             for retry in 0..MAX_RETRIES {
                 if retry > 0 {
                     let delay = Duration::from_millis(BASE_BACKOFF_MS * 2u64.pow(retry - 1));
-                    self.emit_debug(&format!(
-                        "\n(API hiccup, retrying in {}s... attempt {}/{})",
+                    self.emit_status(&format!(
+                        "(API hiccup, retrying in {}s... attempt {}/{})",
                         delay.as_secs(), retry + 1, MAX_RETRIES
                     ));
                     tokio::time::sleep(delay).await;
@@ -586,7 +588,7 @@ impl Agent {
                             text_buf.push_str(&text);
                         }
                         StreamEvent::ReasoningDelta { text } => {
-                            self.emit_debug(&text);
+                            self.emit_reasoning(&text);
                         }
                         StreamEvent::TextDone { .. } => {}
                         StreamEvent::ToolUseStart { id, name } => {
@@ -601,7 +603,7 @@ impl Agent {
                             });
                         }
                         StreamEvent::Error { message } => {
-                            self.emitln_debug(&format!("\nError: {message}"));
+                            self.emit_status(&format!("Stream error: {message}"));
                             got_error = true;
                             break;
                         }
@@ -630,7 +632,7 @@ impl Agent {
                     }
                     Ok(Err(e)) => {
                         if retry == MAX_RETRIES - 1 {
-                            self.emitln_debug(&format!("\nProvider error: {e}"));
+                            self.emit_error(&format!("Provider error: {e}"));
                             return Ok(AgentResponse {
                                 text: text_buf,
                                 tool_calls,
@@ -639,7 +641,7 @@ impl Agent {
                         }
                     }
                     Err(e) => {
-                        self.emitln_debug(&format!("\nInternal error: {e}"));
+                        self.emit_error(&format!("Internal error: {e}"));
                         return Ok(AgentResponse {
                             text: String::new(),
                             tool_calls: Vec::new(),
@@ -650,7 +652,7 @@ impl Agent {
             }
 
             if !turn_ok {
-                self.emitln_debug(&format!("\nFailed after {MAX_RETRIES} retries"));
+                self.emit_error(&format!("Failed after {MAX_RETRIES} retries"));
                 return Ok(AgentResponse {
                     text: text_buf,
                     tool_calls,
@@ -682,7 +684,7 @@ impl Agent {
                 safe_mode: self.config.safe_mode,
             };
 
-            self.emitln_debug(&format!("Running {} tool(s)...\n", tool_calls.len()));
+            self.emit_tool(&format!("Running {} tool(s)...", tool_calls.len()));
 
             let results = self
                 .tool_registry
@@ -691,7 +693,7 @@ impl Agent {
 
             for result in &results {
                 if result.is_error {
-                    self.emitln_debug(&format!(
+                    self.emit_tool(&format!(
                         "  [{}] Error: {}",
                         result.tool_call_id, result.content
                     ));
@@ -703,14 +705,14 @@ impl Agent {
                         .collect::<Vec<_>>()
                         .join("\n");
                     if preview.len() < result.content.len() {
-                        self.emitln_debug(&format!(
+                        self.emit_tool(&format!(
                             "  [{}] {}\n  ... ({} more chars)",
                             result.tool_call_id,
                             preview,
                             result.content.len() - preview.len()
                         ));
                     } else if !preview.is_empty() {
-                        self.emitln_debug(&format!(
+                        self.emit_tool(&format!(
                             "  [{}] {}",
                             result.tool_call_id, preview
                         ));
@@ -760,7 +762,7 @@ impl Agent {
             self.save_session(session);
 
             if let Some(ref tui) = self.tui {
-                let _ = tui.turn_tx.send(());
+                let _ = tui.tx.send(AgentEvent::TurnEnd);
             }
         }
     }
