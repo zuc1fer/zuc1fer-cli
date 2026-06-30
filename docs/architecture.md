@@ -3,14 +3,13 @@
 ## Crate Dependency Graph
 
 ```
-src/main.rs (CLI binary)
-  └── zuc1fer-core (agent, config, session)
-        ├── zuc1fer-tools (tool implementations + registry)
-        ├── zuc1fer-llm (provider abstraction)
-        │     └── providers/ (deepseek, anthropic, openai)
-        └── zuc1fer-search (ripgrep wrappers)
-
-zuc1fer-tui (terminal UI, placeholder)
+src/main.rs (CLI + TUI binary)
+  ├── zuc1fer-core (agent, config, sessions, code index, RepoMap, LSP)
+  │     ├── zuc1fer-tools (tool implementations + registry)
+  │     ├── zuc1fer-llm (provider abstraction)
+  │     │     └── providers/ (deepseek, anthropic, openai, openrouter, ollama)
+  │     └── zuc1fer-mcp (MCP client)
+  └── zuc1fer-tui (ratatui terminal UI)
 ```
 
 ## Agent Loop
@@ -35,7 +34,7 @@ User prompt
 
 ## Tool Execution
 
-All tool calls from a single model response execute in parallel via `futures::future::join_all`. Each tool gets a fresh async task. Results are collected and injected back into the conversation as individual tool messages.
+Read-only tool calls from a single model response execute in parallel via `futures::future::join_all`; mutating tools (`write`/`edit`/`bash`) run sequentially to avoid races. Results are injected back into the conversation as individual tool messages.
 
 ## Provider Abstraction
 
