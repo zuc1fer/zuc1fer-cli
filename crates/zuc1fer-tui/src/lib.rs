@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
@@ -14,6 +14,7 @@ use std::collections::VecDeque;
 use std::sync::OnceLock;
 use tui_textarea::TextArea;
 
+mod ascii_art;
 mod theme;
 use theme::*;
 
@@ -546,7 +547,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     let body = chunks[1];
 
-    if app.show_repo_panel && body.width > 44 {
+    if app.messages.is_empty() && !app.streaming {
+        app.view_height.set(body.height as usize);
+        draw_splash(frame, body);
+    } else if app.show_repo_panel && body.width > 44 {
         let h_chunks =
             Layout::horizontal([Constraint::Min(20), Constraint::Length(34)]).split(body);
 
@@ -1216,6 +1220,18 @@ fn draw_todos_tab(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     frame.render_widget(Paragraph::new(lines).block(panel_block()), area);
+}
+
+fn draw_splash(frame: &mut Frame, area: Rect) {
+    let art = ascii_art::splash_lines();
+    let total = art.len() as u16;
+    let top_pad = area.height.saturating_sub(total) / 2;
+    let mut content: Vec<Line> = Vec::with_capacity(art.len() + top_pad as usize);
+    for _ in 0..top_pad {
+        content.push(Line::from(""));
+    }
+    content.extend(art);
+    frame.render_widget(Paragraph::new(content).alignment(Alignment::Center), area);
 }
 
 fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
