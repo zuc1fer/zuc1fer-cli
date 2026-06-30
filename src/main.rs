@@ -1,4 +1,4 @@
-use zuc1fer_core::agent::Agent;
+use zuc1fer_core::agent::{Agent, AgentEvent};
 use zuc1fer_core::config::Config;
 use zuc1fer_core::session::Session;
 use zuc1fer_core::session_store::SessionStore;
@@ -97,14 +97,11 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     let model = config.model.clone();
 
     let rt = tokio::runtime::Runtime::new()?;
-    let (text_tx, mut text_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let (debug_tx, mut debug_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
     let (prompt_tx, mut prompt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let (done_tx, mut done_rx) = tokio::sync::mpsc::unbounded_channel::<bool>();
-    let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
 
     let agent = rt.block_on(Agent::new(config, working_dir.clone()))?
-        .with_tui(text_tx.clone(), debug_tx.clone(), turn_tx.clone())
+        .with_tui(event_tx.clone())
         .with_session_store(Arc::new(open_store()?));
     let agent = Arc::new(agent);
     let session = Arc::new(tokio::sync::Mutex::new(Session::new(
@@ -126,114 +123,69 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
         while let Ok(prompt) = prompt_rx.try_recv() {
             let agent_clone = agent.clone();
             let session_clone = session.clone();
-            let text_tx_clone = text_tx.clone();
-            let done_tx_clone = done_tx.clone();
+            let event_tx_clone = event_tx.clone();
 
             app.start_streaming();
 
             let handle = rt.spawn(async move {
                 let mut s = session_clone.lock().await;
-                let result = agent_clone.run(&mut s, &prompt).await;
-                match result {
+                match agent_clone.run(&mut s, &prompt).await {
                     Ok(response) => {
                         if let Some(usage) = &response.usage {
-                            let _ = text_tx_clone.send(format!("__TOKENS__:{}:{}", usage.prompt_tokens, usage.completion_tokens));
+                            let _ = event_tx_clone.send(AgentEvent::Tokens {
+                                input: usage.prompt_tokens,
+                                output: usage.completion_tokens,
+                            });
                         }
                     }
                     Err(e) => {
-                        let _ = text_tx_clone.send(format!("__ERROR__:{}", e));
+                        let _ = event_tx_clone.send(AgentEvent::Error(e.to_string()));
                     }
                 }
-                let _ = done_tx_clone.send(true);
+                let _ = event_tx_clone.send(AgentEvent::Done);
             });
             current_task = Some(handle);
         }
-        while let Ok(text) = text_rx.try_recv() {
-            if text.starts_with("__TOKENS__:") {
-                if let Some(rest) = text.strip_prefix("__TOKENS__:") {
-                    let parts: Vec<&str> = rest.split(':').collect();
-                    if parts.len() == 2 {
-                        app.tokens_in += parts[0].parse::<u64>().unwrap_or(0);
-                        app.tokens_out += parts[1].parse::<u64>().unwrap_or(0);
-                        app.update_cost();
+        while let Ok(ev) = event_rx.try_recv() {
+            match ev {
+                AgentEvent::Text(t) => {
+                    if app.streaming {
+                        app.append_stream(&t);
+                    } else {
+                        app.add_message(t);
                     }
                 }
-            } else if text.starts_with("__ERROR__:") {
-                if let Some(err) = text.strip_prefix("__ERROR__:") {
-                    app.add_system_message(format!("Error: {err}"));
+                AgentEvent::Reasoning(_) => {}
+                AgentEvent::Tool(s) => app.add_system_message(s),
+                AgentEvent::Status(s) => app.add_system_message(s),
+                AgentEvent::Error(e) => app.add_system_message(format!("Error: {e}")),
+                AgentEvent::Tokens { input, output } => {
+                    app.tokens_in += input;
+                    app.tokens_out += output;
+                    app.update_cost();
                 }
-            } else if app.streaming {
-                app.append_stream(&text);
-            } else {
-                app.add_message(text);
+                AgentEvent::TurnEnd => app.next_turn(),
+                AgentEvent::Done => {
+                    app.end_streaming();
+                    app.status = "Ready".into();
+                    current_task = None;
+                }
+                AgentEvent::Repo(files) => app.repo_files = files,
+                AgentEvent::Mcp(servers) => app.mcp_servers = servers,
+                AgentEvent::Models(models) => app.available_models = models,
+                AgentEvent::Sessions(metas) => {
+                    app.sessions = metas
+                        .into_iter()
+                        .map(|m| zuc1fer_tui::SessionInfo {
+                            id: m.id,
+                            model: m.model,
+                            message_count: m.message_count,
+                            total_tokens: m.total_tokens,
+                            updated_at: m.updated_at,
+                        })
+                        .collect();
+                }
             }
-        }
-        while let Ok(dbg) = debug_rx.try_recv() {
-            if let Some(rest) = dbg.strip_prefix("__REPO__:") {
-                if let Ok(data) = serde_json::from_str::<serde_json::Value>(rest) {
-                    app.repo_files.clear();
-                    if let Some(files) = data["files"].as_array() {
-                        for entry in files {
-                            if let Some(arr) = entry.as_array() {
-                                if arr.len() == 2 {
-                                    let path = arr[0].as_str().unwrap_or("").to_string();
-                                    let score = arr[1].as_f64().unwrap_or(0.0);
-                                    app.repo_files.push((path, score));
-                                }
-                            }
-                        }
-                    }
-                }
-            } else if let Some(rest) = dbg.strip_prefix("__MCP__:") {
-                if let Ok(data) = serde_json::from_str::<serde_json::Value>(rest) {
-                    app.mcp_servers.clear();
-                    if let Some(servers) = data["servers"].as_array() {
-                        for entry in servers {
-                            if let Some(arr) = entry.as_array() {
-                                if arr.len() == 2 {
-                                    let name = arr[0].as_str().unwrap_or("").to_string();
-                                    let connected = arr[1].as_bool().unwrap_or(false);
-                                    app.mcp_servers.push((name, connected));
-                                }
-                            }
-                        }
-                    }
-                }
-            } else if let Some(rest) = dbg.strip_prefix("__MODELS__:") {
-                if let Ok(data) = serde_json::from_str::<serde_json::Value>(rest) {
-                    app.available_models.clear();
-                    if let Some(models) = data["models"].as_array() {
-                        for m in models {
-                            if let Some(name) = m.as_str() {
-                                app.available_models.push(name.to_string());
-                            }
-                        }
-                    }
-                }
-            } else if let Some(rest) = dbg.strip_prefix("__SESSIONS__:") {
-                if let Ok(data) = serde_json::from_str::<Vec<serde_json::Value>>(rest) {
-                    app.sessions.clear();
-                    for s in data {
-                        app.sessions.push(zuc1fer_tui::SessionInfo {
-                            id: s["id"].as_str().unwrap_or("").into(),
-                            model: s["model"].as_str().unwrap_or("").into(),
-                            message_count: s["msgs"].as_u64().unwrap_or(0) as usize,
-                            total_tokens: s["tokens"].as_u64().unwrap_or(0),
-                            updated_at: s["updated"].as_str().unwrap_or("").into(),
-                        });
-                    }
-                }
-            } else if dbg.contains("Running") || dbg.contains("Error") || dbg.contains("retrying") {
-                app.add_system_message(dbg);
-            }
-        }
-        while turn_rx.try_recv().is_ok() {
-            app.next_turn();
-        }
-        while done_rx.try_recv().is_ok() {
-            app.end_streaming();
-            app.status = "Ready".into();
-            current_task = None;
         }
 
         terminal.draw(|f| zuc1fer_tui::draw(f, &app))?;
