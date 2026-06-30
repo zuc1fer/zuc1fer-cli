@@ -13,6 +13,8 @@ pub struct Config {
     #[serde(default)]
     pub require_approval: bool,
     #[serde(default)]
+    pub no_repomap: bool,
+    #[serde(default)]
     pub mcp: Vec<McpServerConfig>,
 }
 
@@ -86,6 +88,7 @@ impl Default for Config {
             system_prompt: None,
             safe_mode: false,
             require_approval: false,
+            no_repomap: false,
             mcp: Vec::new(),
         }
     }

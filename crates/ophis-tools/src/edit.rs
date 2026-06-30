@@ -8,7 +8,7 @@ impl Tool for EditTool {
     fn definition(&self) -> ToolDef {
         ToolDef {
             name: "edit".into(),
-            description: "Perform exact string replacements in a file. When editing, preserve the exact indentation (tabs/spaces) as it appears. The edit will fail if oldString is not unique in the file — provide more surrounding context to make it unique.".into(),
+            description: "Perform exact string replacements in a file. Use for surgical changes to existing files (prefer over write for small edits). Provide enough surrounding context in oldString to make it unique. Use replaceAll for renaming across the whole file. Preserve exact indentation when matching.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {

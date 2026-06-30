@@ -8,7 +8,7 @@ impl Tool for ReadTool {
     fn definition(&self) -> ToolDef {
         ToolDef {
             name: "read".into(),
-            description: "Read a file from the filesystem. Returns content with line numbers. Supports offset and limit for large files.".into(),
+            description: "Read a file from the filesystem. Use for reading specific files you already know about by path. Prefer glob for finding files by pattern and grep for searching file contents. Supports offset (1-indexed line) and limit to read portions of large files.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {

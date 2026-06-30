@@ -157,8 +157,14 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
             config.require_approval = true;
         } else if arg == "--verbose" {
             _verbose = true;
+        } else if arg == "--no-repomap" {
+            config.no_repomap = true;
         } else if arg == "--format" || arg == "--format=json" {
             // ignored in TUI mode
+        } else if let Some(turns) = arg.strip_prefix("--max-turns=") {
+            if let Ok(n) = turns.parse::<u32>() {
+                config.max_turns = n;
+            }
         }
     }
 
@@ -399,8 +405,14 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
             config.require_approval = true;
         } else if arg == "--verbose" {
             verbose = true;
+        } else if arg == "--no-repomap" {
+            config.no_repomap = true;
         } else if arg == "--format" || arg == "--format=json" {
             // parsed, handled downstream
+        } else if let Some(turns) = arg.strip_prefix("--max-turns=") {
+            if let Ok(n) = turns.parse::<u32>() {
+                config.max_turns = n;
+            }
         } else if let Some(model) = arg.strip_prefix("--model=") {
             config.model = model.to_string();
         } else if arg == "--model" {
@@ -861,6 +873,8 @@ fn print_usage(bin: &str) {
     println!("  --confirm                 Require approval before write/edit/bash");
     println!("  --verbose                 Print per-turn token usage");
     println!("  --format json             NDJSON structured output (one-shot mode)");
+    println!("  --max-turns=<N>           Max tool-call turns before stopping (default: 100)");
+    println!("  --no-repomap              Skip repository map context (faster startup)");
     println!("  --prompt=<text>           One-shot prompt (non-interactive)");
     println!();
     println!("Examples:");
@@ -868,6 +882,7 @@ fn print_usage(bin: &str) {
     println!("  {bin} chat --tui");
     println!("  {bin} chat --prompt=\"explain this project\" --verbose");
     println!("  {bin} chat --prompt=\"refactor this\" --format json");
+    println!("  {bin} chat --prompt=\"fix bug\" --max-turns=5");
     println!();
     println!("Environment variables:");
     println!("  DEEPSEEK_API_KEY    DeepSeek API key");

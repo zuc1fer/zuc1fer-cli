@@ -66,7 +66,7 @@ impl Tool for GrepTool {
     fn definition(&self) -> ToolDef {
         ToolDef {
             name: "grep".into(),
-            description: "Search file contents using regex patterns. Returns file paths with line numbers and matching lines. Honors .gitignore, skips binary files. Results limited to 100 matches.".into(),
+            description: "Search file contents using regex patterns. Use for finding code patterns, variable usages, function definitions, etc. across the codebase. Returns file:line:content. Supports include filter to narrow by file extension. Honors .gitignore. Results limited to 100 matches.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {

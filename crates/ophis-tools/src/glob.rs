@@ -39,7 +39,7 @@ impl Tool for GlobTool {
     fn definition(&self) -> ToolDef {
         ToolDef {
             name: "glob".into(),
-            description: "Find files matching a glob pattern. Supports patterns like '**/*.rs', 'src/**/*.ts'. Honors .gitignore. Results limited to 100 files.".into(),
+            description: "Find files matching a glob pattern. Use for discovering files by name pattern before reading them. Supports '**/*.rs', 'src/**/*.ts', etc. Honors .gitignore. Results limited to 100 files.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
