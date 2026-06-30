@@ -14,8 +14,8 @@ impl OpenRouterProvider {
         Self {
             api_key: SecretString::from(api_key.into()),
             base_url: "https://openrouter.ai/api/v1".into(),
-            http_referer: "https://github.com/zuc1fer/zuc1fer-cli".into(),
-            app_title: "zuc1fer".into(),
+            http_referer: "https://github.com/zuc1fer/ophis".into(),
+            app_title: "OPHIS".into(),
         }
     }
 
