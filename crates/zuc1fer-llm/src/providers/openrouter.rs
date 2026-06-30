@@ -135,7 +135,10 @@ impl LlmProvider for OpenRouterProvider {
 
         let response = client
             .post(format!("{}/chat/completions", self.base_url))
-            .header("Authorization", format!("Bearer {}", self.api_key.expose_secret()))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.api_key.expose_secret()),
+            )
             .header("HTTP-Referer", &self.http_referer)
             .header("X-Title", &self.app_title)
             .header("Content-Type", "application/json")
@@ -205,12 +208,10 @@ impl LlmProvider for OpenRouterProvider {
                                                     .unwrap_or("")
                                                     .to_string();
                                                 current_tool_name = name.clone();
-                                                let _ = event_tx.send(
-                                                    StreamEvent::ToolUseStart {
-                                                        id: id.to_string(),
-                                                        name,
-                                                    },
-                                                );
+                                                let _ = event_tx.send(StreamEvent::ToolUseStart {
+                                                    id: id.to_string(),
+                                                    name,
+                                                });
                                             }
                                         }
                                         if let Some(args) = tc["function"]["arguments"].as_str() {
@@ -234,9 +235,8 @@ impl LlmProvider for OpenRouterProvider {
                             if let Some(reason) = choice["finish_reason"].as_str() {
                                 if reason == "tool_calls" && current_tool_id.is_some() {
                                     let id = current_tool_id.take().unwrap();
-                                    let input: Value =
-                                        serde_json::from_str(&current_tool_args)
-                                            .unwrap_or(Value::Null);
+                                    let input: Value = serde_json::from_str(&current_tool_args)
+                                        .unwrap_or(Value::Null);
                                     let _ = event_tx.send(StreamEvent::ToolUseDone {
                                         id,
                                         name: current_tool_name.clone(),

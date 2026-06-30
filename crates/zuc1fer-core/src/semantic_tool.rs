@@ -19,7 +19,8 @@ impl Tool for SemanticTool {
             name: "semantic".into(),
             description: "Search the codebase using BM25 full-text ranking. \
                 Returns ranked file paths with relevance scores and content snippets. \
-                Use this to find code by keywords, function names, or concepts.".into(),
+                Use this to find code by keywords, function names, or concepts."
+                .into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {

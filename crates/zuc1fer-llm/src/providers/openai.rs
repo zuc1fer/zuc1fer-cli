@@ -146,7 +146,10 @@ impl LlmProvider for OpenAIProvider {
 
         let response = client
             .post(format!("{}/v1/chat/completions", self.base_url))
-            .header("Authorization", format!("Bearer {}", self.api_key.expose_secret()))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.api_key.expose_secret()),
+            )
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -197,10 +200,11 @@ impl LlmProvider for OpenAIProvider {
                                         if let Some(id) = tc["id"].as_str() {
                                             if current_tool_id.as_deref() != Some(id) {
                                                 if let Some(prev_id) = current_tool_id.take() {
-                                                    let input = serde_json::from_str(&current_tool_args)
-                                                        .unwrap_or(Value::Null);
-                                                    let _ = event_tx
-                                                        .send(StreamEvent::ToolUseDone {
+                                                    let input =
+                                                        serde_json::from_str(&current_tool_args)
+                                                            .unwrap_or(Value::Null);
+                                                    let _ =
+                                                        event_tx.send(StreamEvent::ToolUseDone {
                                                             id: prev_id,
                                                             name: current_tool_name.clone(),
                                                             input,
@@ -213,12 +217,10 @@ impl LlmProvider for OpenAIProvider {
                                                     .unwrap_or("")
                                                     .to_string();
                                                 current_tool_name = name.clone();
-                                                let _ = event_tx.send(
-                                                    StreamEvent::ToolUseStart {
-                                                        id: id.to_string(),
-                                                        name,
-                                                    },
-                                                );
+                                                let _ = event_tx.send(StreamEvent::ToolUseStart {
+                                                    id: id.to_string(),
+                                                    name,
+                                                });
                                             }
                                         }
                                         if let Some(args) = tc["function"]["arguments"].as_str() {

@@ -1,4 +1,7 @@
-use crate::{ast_grep::AstGrepTool, bash::BashTool, edit::EditTool, git::GitTool, glob::GlobTool, grep::GrepTool, read::ReadTool, webfetch::WebFetch, websearch::WebSearch, write::WriteTool};
+use crate::{
+    ast_grep::AstGrepTool, bash::BashTool, edit::EditTool, git::GitTool, glob::GlobTool,
+    grep::GrepTool, read::ReadTool, webfetch::WebFetch, websearch::WebSearch, write::WriteTool,
+};
 use crate::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -44,11 +47,7 @@ impl ToolRegistry {
         self.tools.get(name).cloned()
     }
 
-    pub async fn execute(
-        &self,
-        call: &ToolCall,
-        ctx: &ToolContext,
-    ) -> anyhow::Result<ToolResult> {
+    pub async fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> anyhow::Result<ToolResult> {
         let name = &call.name;
 
         if let Some(tool) = self.tools.get(name) {
@@ -61,11 +60,7 @@ impl ToolRegistry {
         }
     }
 
-    pub async fn execute_parallel(
-        &self,
-        calls: &[ToolCall],
-        ctx: &ToolContext,
-    ) -> Vec<ToolResult> {
+    pub async fn execute_parallel(&self, calls: &[ToolCall], ctx: &ToolContext) -> Vec<ToolResult> {
         const SERIAL: &[&str] = &["write", "edit", "bash"];
 
         let mut results: Vec<Option<ToolResult>> = vec![None; calls.len()];

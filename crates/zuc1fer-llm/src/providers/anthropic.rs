@@ -1,6 +1,4 @@
-use crate::{
-    ChatRequest, ContentBlock, LlmProvider, StreamEvent, Usage,
-};
+use crate::{ChatRequest, ContentBlock, LlmProvider, StreamEvent, Usage};
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::Value;
 
@@ -57,13 +55,11 @@ impl AnthropicProvider {
             .collect();
 
         let system_block = if request.cache_system {
-            vec![
-                serde_json::json!({
-                    "type": "text",
-                    "text": request.system,
-                    "cache_control": { "type": "ephemeral" }
-                }),
-            ]
+            vec![serde_json::json!({
+                "type": "text",
+                "text": request.system,
+                "cache_control": { "type": "ephemeral" }
+            })]
         } else {
             vec![serde_json::json!({
                 "type": "text",
@@ -215,8 +211,8 @@ impl LlmProvider for AnthropicProvider {
                         }
                         "content_block_stop" => {
                             if !current_tool_id.is_empty() && !current_tool_name.is_empty() {
-                                let input: Value =
-                                    serde_json::from_str(&current_tool_input).unwrap_or(Value::Null);
+                                let input: Value = serde_json::from_str(&current_tool_input)
+                                    .unwrap_or(Value::Null);
                                 let _ = event_tx.send(StreamEvent::ToolUseDone {
                                     id: std::mem::take(&mut current_tool_id),
                                     name: std::mem::take(&mut current_tool_name),
@@ -226,21 +222,16 @@ impl LlmProvider for AnthropicProvider {
                         }
                         "message_delta" => {
                             if let Some(u) = obj["usage"].as_object() {
-                                usage.completion_tokens = u
-                                    .get("output_tokens")
-                                    .and_then(|v| v.as_u64())
-                                    .unwrap_or(0);
+                                usage.completion_tokens =
+                                    u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
                             }
                         }
                         "message_start" => {
                             if let Some(u) = obj["message"]["usage"].as_object() {
-                                usage.prompt_tokens = u
-                                    .get("input_tokens")
-                                    .and_then(|v| v.as_u64())
-                                    .unwrap_or(0);
-                                usage.cache_read_tokens = u
-                                    .get("cache_read_input_tokens")
-                                    .and_then(|v| v.as_u64());
+                                usage.prompt_tokens =
+                                    u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                usage.cache_read_tokens =
+                                    u.get("cache_read_input_tokens").and_then(|v| v.as_u64());
                                 usage.cache_write_tokens = u
                                     .get("cache_creation_input_tokens")
                                     .and_then(|v| v.as_u64());

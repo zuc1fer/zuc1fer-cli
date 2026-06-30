@@ -12,9 +12,7 @@ use crate::session_store::SessionStore;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use zuc1fer_llm::{
-    ChatRequest, ProviderRegistry, StreamEvent, ToolDefinition,
-};
+use zuc1fer_llm::{ChatRequest, ProviderRegistry, StreamEvent, ToolDefinition};
 use zuc1fer_tools::{ToolCall, ToolContext, ToolRegistry, ToolResult};
 
 const MAX_RETRIES: u32 = 3;
@@ -106,10 +104,9 @@ impl Agent {
             if !provider_config.api_key.is_empty() {
                 match name.as_str() {
                     "deepseek" => {
-                        let mut p =
-                            zuc1fer_llm::providers::deepseek::DeepSeekProvider::new(
-                                provider_config.api_key.clone(),
-                            );
+                        let mut p = zuc1fer_llm::providers::deepseek::DeepSeekProvider::new(
+                            provider_config.api_key.clone(),
+                        );
                         if let Some(ref url) = provider_config.base_url {
                             p = p.with_base_url(url);
                         }
@@ -123,10 +120,9 @@ impl Agent {
                         ));
                     }
                     "openai" => {
-                        let mut p =
-                            zuc1fer_llm::providers::openai::OpenAIProvider::new(
-                                provider_config.api_key.clone(),
-                            );
+                        let mut p = zuc1fer_llm::providers::openai::OpenAIProvider::new(
+                            provider_config.api_key.clone(),
+                        );
                         if let Some(ref url) = provider_config.base_url {
                             p = p.with_base_url(url);
                         }
@@ -481,13 +477,7 @@ impl Agent {
         };
 
         session.messages = std::iter::once(compacted_msg)
-            .chain(
-                session
-                    .messages
-                    .clone()
-                    .into_iter()
-                    .skip(to_compact.len()),
-            )
+            .chain(session.messages.clone().into_iter().skip(to_compact.len()))
             .collect();
 
         tracing::info!(
@@ -514,27 +504,20 @@ impl Agent {
             .map(|(_, m)| m.to_string())
             .unwrap_or_else(|| session.model.clone());
 
-        let provider = self
-            .provider_registry
-            .get(&provider_name)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "No provider '{}' for model '{}'. Available: {}",
-                    provider_name,
-                    session.model,
-                    self.provider_registry.provider_names().join(", ")
-                )
-            })?;
+        let provider = self.provider_registry.get(&provider_name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "No provider '{}' for model '{}'. Available: {}",
+                provider_name,
+                session.model,
+                self.provider_registry.provider_names().join(", ")
+            )
+        })?;
 
         let _ = self
             .config
             .providers
             .get(&provider_name)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "No config for provider '{provider_name}'"
-                )
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("No config for provider '{provider_name}'"))?;
 
         self.maybe_compact(session, &provider, &model_name).await;
         self.emit_repomap();
@@ -561,22 +544,21 @@ impl Agent {
             })
             .collect();
 
-        let mut system_prompt = self
-            .config
-            .system_prompt
-            .clone()
-            .unwrap_or_else(|| {
-                let (os_name, shell_name, shell_sep) = if cfg!(windows) {
-                    ("Windows", "PowerShell", ";")
-                } else {
-                    ("Linux/macOS", "bash/sh", "&&")
-                };
-                SYSTEM_PROMPT
-                    .replace("{working_dir}", &self.working_dir.display().to_string().replace('\\', "/"))
-                    .replace("{os_name}", os_name)
-                    .replace("{shell_name}", shell_name)
-                    .replace("{shell_sep}", shell_sep)
-            });
+        let mut system_prompt = self.config.system_prompt.clone().unwrap_or_else(|| {
+            let (os_name, shell_name, shell_sep) = if cfg!(windows) {
+                ("Windows", "PowerShell", ";")
+            } else {
+                ("Linux/macOS", "bash/sh", "&&")
+            };
+            SYSTEM_PROMPT
+                .replace(
+                    "{working_dir}",
+                    &self.working_dir.display().to_string().replace('\\', "/"),
+                )
+                .replace("{os_name}", os_name)
+                .replace("{shell_name}", shell_name)
+                .replace("{shell_sep}", shell_sep)
+        });
 
         if let Some(ref repomap) = self.repomap {
             system_prompt.push_str("\n\n---\n\n");
@@ -624,7 +606,9 @@ impl Agent {
                     let delay = Duration::from_millis(BASE_BACKOFF_MS * 2u64.pow(retry - 1));
                     self.emit_status(&format!(
                         "(API hiccup, retrying in {}s... attempt {}/{})",
-                        delay.as_secs(), retry + 1, MAX_RETRIES
+                        delay.as_secs(),
+                        retry + 1,
+                        MAX_RETRIES
                     ));
                     tokio::time::sleep(delay).await;
                     text_buf.clear();
@@ -635,9 +619,10 @@ impl Agent {
                 let provider_arc = provider.clone();
                 let request_clone = request.clone();
 
-                let provider_handle = tokio::spawn(async move {
-                    provider_arc.stream_chat(request_clone, event_tx).await
-                });
+                let provider_handle =
+                    tokio::spawn(
+                        async move { provider_arc.stream_chat(request_clone, event_tx).await },
+                    );
 
                 let mut got_error = false;
 
@@ -676,7 +661,8 @@ impl Agent {
                                 *existing += ct;
                             }
                             if let Some(ct) = u.cache_write_tokens {
-                                let existing = accumulated_usage.cache_write_tokens.get_or_insert(0);
+                                let existing =
+                                    accumulated_usage.cache_write_tokens.get_or_insert(0);
                                 *existing += ct;
                             }
                         }
@@ -781,10 +767,7 @@ impl Agent {
                             result.content.len() - preview.len()
                         ));
                     } else if !preview.is_empty() {
-                        self.emit_tool(&format!(
-                            "  [{}] {}",
-                            result.tool_call_id, preview
-                        ));
+                        self.emit_tool(&format!("  [{}] {}", result.tool_call_id, preview));
                     }
                 }
             }
@@ -924,7 +907,10 @@ mod tests {
     #[test]
     fn merge_no_denials_is_passthrough() {
         let calls = vec![call("a", "read"), call("b", "read")];
-        let executed = vec![ToolResult::success("a", "ra"), ToolResult::success("b", "rb")];
+        let executed = vec![
+            ToolResult::success("a", "ra"),
+            ToolResult::success("b", "rb"),
+        ];
         let merged = merge_tool_results(&calls, executed, &HashSet::new());
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].tool_call_id, "a");
@@ -934,7 +920,10 @@ mod tests {
     #[test]
     fn merge_denied_preserves_order_and_marks_error() {
         let calls = vec![call("a", "read"), call("b", "write"), call("c", "read")];
-        let executed = vec![ToolResult::success("c", "rc"), ToolResult::success("a", "ra")];
+        let executed = vec![
+            ToolResult::success("c", "rc"),
+            ToolResult::success("a", "ra"),
+        ];
         let mut denied = HashSet::new();
         denied.insert("b".to_string());
         let merged = merge_tool_results(&calls, executed, &denied);

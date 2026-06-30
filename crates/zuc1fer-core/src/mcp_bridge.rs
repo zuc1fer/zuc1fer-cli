@@ -39,11 +39,12 @@ impl McpBridge {
         self.tools
             .iter()
             .map(|t| zuc1fer_tools::ToolDef {
-                name: format!("mcp__{}_{}", self.server_name.replace(['-', ' '], "_"), t.name),
-                description: format!(
-                    "[MCP: {}] {}",
-                    self.server_name, t.description
+                name: format!(
+                    "mcp__{}_{}",
+                    self.server_name.replace(['-', ' '], "_"),
+                    t.name
                 ),
+                description: format!("[MCP: {}] {}", self.server_name, t.description),
                 parameters: t.input_schema.clone(),
             })
             .collect()

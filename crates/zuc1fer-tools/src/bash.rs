@@ -1,7 +1,7 @@
 use crate::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
 use std::process::Stdio;
-use tokio::process::Command;
 use tokio::io::AsyncReadExt;
+use tokio::process::Command;
 
 pub struct BashTool;
 
@@ -37,8 +37,7 @@ impl Tool for BashTool {
     async fn execute(&self, call: &ToolCall, ctx: &ToolContext) -> anyhow::Result<ToolResult> {
         let cmd = call.arguments["command"].as_str().unwrap_or("");
         let timeout_ms = call.arguments["timeout"].as_u64().unwrap_or(120_000);
-        let workdir = call
-            .arguments["workdir"]
+        let workdir = call.arguments["workdir"]
             .as_str()
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| ctx.working_dir.clone());
@@ -46,9 +45,8 @@ impl Tool for BashTool {
         if ctx.safe_mode {
             let lower = cmd.to_lowercase();
             let dangerous = [
-                "rm ", "del ", "rmdir ", "sudo ", "chmod ", "chown ",
-                "dd ", "mkfs", "shutdown", "reboot", "halt",
-                "format ", "fdisk", "diskpart",
+                "rm ", "del ", "rmdir ", "sudo ", "chmod ", "chown ", "dd ", "mkfs", "shutdown",
+                "reboot", "halt", "format ", "fdisk", "diskpart",
             ];
             for pattern in &dangerous {
                 if lower.contains(pattern) {

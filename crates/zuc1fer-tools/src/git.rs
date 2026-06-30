@@ -55,7 +55,10 @@ impl GitTool {
 
             output.push_str(&format!(
                 "{} {} {} {}\n",
-                short_id, ts, author.name().unwrap_or("unknown"), message
+                short_id,
+                ts,
+                author.name().unwrap_or("unknown"),
+                message
             ));
         }
         Ok(output.trim().to_string())
@@ -106,11 +109,7 @@ impl GitTool {
         let parent_tree = commit.parents().next().and_then(|p| p.tree().ok());
 
         let mut opts = git2::DiffOptions::new();
-        let diff = repo.diff_tree_to_tree(
-            parent_tree.as_ref(),
-            Some(&tree),
-            Some(&mut opts),
-        )?;
+        let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
 
         let mut patch = String::new();
         diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
@@ -185,12 +184,12 @@ impl Tool for GitTool {
                     }
                     "status" => self.status(&repo),
                     "show" => {
-                        let target = call.arguments["target"]
-                            .as_str()
-                            .unwrap_or("HEAD");
+                        let target = call.arguments["target"].as_str().unwrap_or("HEAD");
                         self.show(&repo, target)
                     }
-                    _ => anyhow::bail!("Unknown git command: {command}. Use: diff, log, status, show"),
+                    _ => anyhow::bail!(
+                        "Unknown git command: {command}. Use: diff, log, status, show"
+                    ),
                 };
 
                 match result {

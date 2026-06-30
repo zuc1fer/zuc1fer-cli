@@ -14,8 +14,8 @@ fn search_files(
     include: Option<String>,
     limit: usize,
 ) -> anyhow::Result<(Vec<String>, usize)> {
-    let matcher = RegexMatcher::new(pattern)
-        .map_err(|e| anyhow::anyhow!("Invalid regex pattern: {e}"))?;
+    let matcher =
+        RegexMatcher::new(pattern).map_err(|e| anyhow::anyhow!("Invalid regex pattern: {e}"))?;
 
     let include_matcher = match include.as_deref() {
         Some(inc) if !inc.is_empty() => Some(
@@ -114,7 +114,12 @@ impl Tool for GrepTool {
         let (matches, total) = match res {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => return Ok(ToolResult::error(&call.id, e.to_string())),
-            Err(e) => return Ok(ToolResult::error(&call.id, format!("grep task failed: {e}"))),
+            Err(e) => {
+                return Ok(ToolResult::error(
+                    &call.id,
+                    format!("grep task failed: {e}"),
+                ))
+            }
         };
 
         if matches.is_empty() {
@@ -126,7 +131,10 @@ impl Tool for GrepTool {
             result
                 .metadata
                 .get_or_insert_with(std::collections::HashMap::new)
-                .insert("truncated".into(), format!("true ({total} total, showing {limit})"));
+                .insert(
+                    "truncated".into(),
+                    format!("true ({total} total, showing {limit})"),
+                );
         }
         Ok(result)
     }

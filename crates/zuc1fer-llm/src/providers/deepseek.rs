@@ -1,6 +1,4 @@
-use crate::{
-    ChatRequest, ContentBlock, LlmProvider, StreamEvent, ToolDefinition, Usage,
-};
+use crate::{ChatRequest, ContentBlock, LlmProvider, StreamEvent, ToolDefinition, Usage};
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::Value;
 
@@ -144,7 +142,10 @@ impl LlmProvider for DeepSeekProvider {
 
         let response = client
             .post(format!("{}/chat/completions", self.base_url))
-            .header("Authorization", format!("Bearer {}", self.api_key.expose_secret()))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.api_key.expose_secret()),
+            )
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -198,11 +199,12 @@ impl LlmProvider for DeepSeekProvider {
                                                     let input: Value =
                                                         serde_json::from_str(&current_tool_args)
                                                             .unwrap_or(Value::Null);
-                                                    let _ = event_tx.send(StreamEvent::ToolUseDone {
-                                                        id: prev_id,
-                                                        name: current_tool_name.clone(),
-                                                        input,
-                                                    });
+                                                    let _ =
+                                                        event_tx.send(StreamEvent::ToolUseDone {
+                                                            id: prev_id,
+                                                            name: current_tool_name.clone(),
+                                                            input,
+                                                        });
                                                 }
                                                 current_tool_id = Some(id.to_string());
                                                 current_tool_args.clear();
@@ -211,12 +213,10 @@ impl LlmProvider for DeepSeekProvider {
                                                     .unwrap_or("")
                                                     .to_string();
                                                 current_tool_name = name.clone();
-                                                let _ = event_tx.send(
-                                                    StreamEvent::ToolUseStart {
-                                                        id: id.to_string(),
-                                                        name,
-                                                    },
-                                                );
+                                                let _ = event_tx.send(StreamEvent::ToolUseStart {
+                                                    id: id.to_string(),
+                                                    name,
+                                                });
                                             }
                                         }
                                         if let Some(args) = tc["function"]["arguments"].as_str() {
@@ -247,9 +247,8 @@ impl LlmProvider for DeepSeekProvider {
                             if let Some(reason) = choice["finish_reason"].as_str() {
                                 if reason == "tool_calls" && current_tool_id.is_some() {
                                     let id = current_tool_id.take().unwrap();
-                                    let input: Value =
-                                        serde_json::from_str(&current_tool_args)
-                                            .unwrap_or(Value::Null);
+                                    let input: Value = serde_json::from_str(&current_tool_args)
+                                        .unwrap_or(Value::Null);
                                     let _ = event_tx.send(StreamEvent::ToolUseDone {
                                         id,
                                         name: current_tool_name.clone(),
@@ -298,7 +297,7 @@ impl LlmProvider for DeepSeekProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Message, Role, ContentBlock};
+    use crate::{ContentBlock, Message, Role};
 
     fn provider() -> DeepSeekProvider {
         DeepSeekProvider::new("sk-test")
@@ -337,9 +336,11 @@ mod tests {
     fn test_convert_tool_result_message() {
         let msg = Message {
             role: Role::Tool,
-            content: vec![
-                ContentBlock::tool_result("call_1", "found 5 matches", false),
-            ],
+            content: vec![ContentBlock::tool_result(
+                "call_1",
+                "found 5 matches",
+                false,
+            )],
         };
         let json = provider().convert_message(&msg);
         assert_eq!(json["role"], "tool");
