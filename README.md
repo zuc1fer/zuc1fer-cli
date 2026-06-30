@@ -12,7 +12,7 @@
 - **Rich tool set** — bash, read, write, edit, glob, grep, ast-grep, semantic search, git, LSP, web fetch/search, plus MCP servers and plugins.
 - **Parallel reads, serialized writes** — independent read-only tool calls run concurrently; mutating calls (`write`/`edit`/`bash`) run in order.
 - **Auto-retry** — exponential backoff (3 retries) on network hiccups.
-- **Single Rust binary** — fast and compiled. (`grep`/`glob`/`ast_grep` shell out to `rg`/`sg` when used.)
+- **Single Rust binary** — fast and compiled. File search and git are native (bundled ripgrep libraries + libgit2); only the optional `ast_grep` and `lsp` tools call external programs.
 
 ## Quick Start
 
