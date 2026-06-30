@@ -153,22 +153,27 @@ impl Indexer {
                 }
 
                 let to_index: Vec<PathBuf> = pending.drain().collect();
+                let mut batch: Vec<(PathBuf, String, Vec<String>, String)> = Vec::new();
                 for file_path in &to_index {
                     let content = match std::fs::read_to_string(file_path) {
                         Ok(c) => c,
                         Err(_) => continue,
                     };
-                    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    let ext = file_path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .to_string();
                     let mut parser = TsParser::new();
                     let symbols: Vec<String> = parser
                         .extract_symbols(file_path, &content)
                         .into_iter()
                         .map(|s| s.name)
                         .collect();
-
-                    if let Err(e) = self.index.index_file(file_path, &content, &symbols, ext) {
-                        tracing::warn!("Failed to index {}: {e}", file_path.display());
-                    }
+                    batch.push((file_path.clone(), content, symbols, ext));
+                }
+                if let Err(e) = self.index.index_files_batch(&batch) {
+                    tracing::warn!("Failed to index batch: {e}");
                 }
             }
         }
