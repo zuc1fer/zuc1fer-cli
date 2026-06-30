@@ -12,7 +12,7 @@ use crate::session_store::SessionStore;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use ophis_llm::{ChatRequest, ProviderRegistry, StreamEvent, ToolDefinition};
+use ophis_llm::{ChatRequest, ProviderRegistry, StreamEvent, ToolDefinition, Usage};
 use ophis_tools::{ToolCall, ToolContext, ToolRegistry, ToolResult};
 
 const MAX_RETRIES: u32 = 3;
@@ -73,8 +73,10 @@ pub enum AgentEvent {
     Tool(String),
     Status(String),
     Error(String),
-    Tokens { input: u64, output: u64 },
-    TurnEnd,
+    Tokens { input: u64, output: u64, turn: u32 },
+    ToolCallInfo { id: String, name: String, input: serde_json::Value, turn: u32 },
+    ToolResultInfo { id: String, content: String, is_error: bool, turn: u32 },
+    TurnEnd { turn: u32, tokens: ophis_llm::Usage },
     Done,
     Repo(Vec<(String, f64)>),
     Mcp(Vec<(String, bool)>),
@@ -598,7 +600,8 @@ impl Agent {
         let supports_caching = provider.supports_prompt_caching();
 
         let mut turn_count = 0;
-        let mut accumulated_usage = ophis_llm::Usage::default();
+        let mut accumulated_usage = Usage::default();
+        let mut prev_usage = Usage::default();
 
         loop {
             turn_count += 1;
@@ -671,6 +674,14 @@ impl Agent {
                         }
                         StreamEvent::ToolUseDelta { .. } => {}
                         StreamEvent::ToolUseDone { id, name, input } => {
+                            if let Some(ref tui) = self.tui {
+                                let _ = tui.tx.send(AgentEvent::ToolCallInfo {
+                                    id: id.clone(),
+                                    name: name.clone(),
+                                    input: input.clone(),
+                                    turn: turn_count,
+                                });
+                            }
                             tool_calls.push(ToolCall {
                                 id,
                                 name,
@@ -800,6 +811,14 @@ impl Agent {
                         self.emit_tool(&format!("  [{}] {}", result.tool_call_id, preview));
                     }
                 }
+                if let Some(ref tui) = self.tui {
+                    let _ = tui.tx.send(AgentEvent::ToolResultInfo {
+                        id: result.tool_call_id.clone(),
+                        content: result.content.clone(),
+                        is_error: result.is_error,
+                        turn: turn_count,
+                    });
+                }
             }
 
             let tool_call_json: Vec<serde_json::Value> = tool_calls
@@ -843,8 +862,20 @@ impl Agent {
             session.total_tokens = accumulated_usage.total_tokens;
             self.save_session(session);
 
+            let turn_usage = Usage {
+                prompt_tokens: accumulated_usage.prompt_tokens - prev_usage.prompt_tokens,
+                completion_tokens: accumulated_usage.completion_tokens - prev_usage.completion_tokens,
+                total_tokens: accumulated_usage.total_tokens - prev_usage.total_tokens,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+            };
+            prev_usage = accumulated_usage.clone();
+
             if let Some(ref tui) = self.tui {
-                let _ = tui.tx.send(AgentEvent::TurnEnd);
+                let _ = tui.tx.send(AgentEvent::TurnEnd {
+                    turn: turn_count,
+                    tokens: turn_usage,
+                });
             }
         }
     }
