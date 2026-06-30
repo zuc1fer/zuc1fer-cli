@@ -18,7 +18,7 @@ static SYNTAX_SET: OnceLock<syntect::parsing::SyntaxSet> = OnceLock::new();
 static THEME: OnceLock<syntect::highlighting::Theme> = OnceLock::new();
 
 fn get_syntax_set() -> &'static syntect::parsing::SyntaxSet {
-    SYNTAX_SET.get_or_init(|| syntect::parsing::SyntaxSet::load_defaults_newlines())
+    SYNTAX_SET.get_or_init(syntect::parsing::SyntaxSet::load_defaults_newlines)
 }
 
 fn get_theme() -> &'static syntect::highlighting::Theme {
@@ -109,7 +109,7 @@ impl App {
             model: model.to_string(),
             tokens_in: 0,
             tokens_out: 0,
-            context_max_tokens: 131072,
+            context_max_tokens: model_context_limit(model),
             running: true,
             streaming: false,
             repo_files: Vec::new(),
@@ -339,11 +339,13 @@ impl App {
                 }
                 KeyCode::Enter => {
                     let sel = self.model_picker_selection;
+                    let chosen = filtered_models(&self.available_models, &self.model_picker_query)
+                        .get(sel)
+                        .map(|m| (*m).clone());
                     self.show_model_picker = false;
                     self.model_picker_query.clear();
                     self.model_picker_selection = 0;
-                    let models = filtered_models(&self.available_models, "");
-                    if let Some(model) = models.get(sel) {
+                    if let Some(model) = chosen {
                         return Some(format!("__MODEL_SELECT__:{}", model));
                     }
                 }
@@ -614,7 +616,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
             .as_millis()
             / 100) as usize
             % frames.len();
-        format!("{}", frames[idx])
+        frames[idx].to_string()
     } else {
         String::new()
     };
@@ -673,7 +675,7 @@ fn draw_command_palette(frame: &mut Frame, app: &App) {
     let commands = palette_commands();
 
     let filtered: Vec<(&str, &str)> = if app.palette_query.is_empty() {
-        commands.iter().copied().collect()
+        commands.to_vec()
     } else {
         let q = app.palette_query.to_lowercase();
         commands
@@ -987,8 +989,9 @@ fn render_tree(lines: &mut Vec<Line>, nodes: &[FileTreeNode], prefix: &str) {
                 Color::DarkGray
             };
             let name = node.name.clone();
-            let display_name = if name.len() > 24 {
-                format!("{}...", &name[..21])
+            let display_name = if name.chars().count() > 24 {
+                let prefix: String = name.chars().take(21).collect();
+                format!("{prefix}...")
             } else {
                 name
             };
@@ -1114,11 +1117,7 @@ fn draw_mcp_tab(frame: &mut Frame, area: Rect, app: &App) {
 fn draw_todos_tab(frame: &mut Frame, area: Rect, app: &App) {
     let done_count = app.todos.iter().filter(|t| t.done).count();
     let total = app.todos.len();
-    let pct = if total > 0 {
-        (done_count * 100) / total
-    } else {
-        0
-    };
+    let pct = (done_count * 100).checked_div(total).unwrap_or(0);
 
     let mut lines = vec![
         Line::from(vec![Span::styled(
@@ -1247,15 +1246,8 @@ fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> Vec<Line<'
                     if trimmed.starts_with("```") {
                         if in_code_block {
                             if !code_buffer.is_empty() {
-                                let highlighted = highlight_code(&code_buffer, &code_lang);
-                                for h in highlighted {
-                                    let wrapped = wrap_text(&h, width.saturating_sub(2));
-                                    for w in wrapped {
-                                        lines.push(Line::from(vec![Span::styled(
-                                            format!("  {w}"),
-                                            Style::default().fg(Color::DarkGray),
-                                        )]));
-                                    }
+                                for hl in highlight_code(&code_buffer, &code_lang) {
+                                    lines.push(hl);
                                 }
                             }
                             code_buffer.clear();
@@ -1279,15 +1271,24 @@ fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> Vec<Line<'
                         code_buffer.push(text_line.to_string());
                         continue;
                     }
-                    let rendered = render_markdown_line(text_line);
-                    let rendered_str = spans_to_string(&rendered);
-                    let wrapped = wrap_text(&rendered_str, width);
-                    for w in wrapped {
-                        if w.is_empty() {
-                            lines.push(Line::from(""));
-                        } else {
-                            let styled = style_line_from_markdown(&w);
-                            lines.push(styled);
+                    let trimmed_para = text_line.trim_start();
+                    let is_block = trimmed_para.starts_with('#')
+                        || trimmed_para.starts_with("- ")
+                        || trimmed_para.starts_with("* ")
+                        || trimmed_para.starts_with("> ")
+                        || trimmed_para == "---"
+                        || trimmed_para == "***"
+                        || trimmed_para == "___"
+                        || numbered_prefix(trimmed_para).is_some();
+                    if is_block {
+                        lines.push(Line::from(render_markdown_line(text_line)));
+                    } else {
+                        for w in wrap_text(text_line, width) {
+                            if w.is_empty() {
+                                lines.push(Line::from(""));
+                            } else {
+                                lines.push(Line::from(render_inline_markdown(&w)));
+                            }
                         }
                     }
                 }
@@ -1419,18 +1420,6 @@ fn render_inline_markdown(line: &str) -> Vec<Span<'static>> {
     spans
 }
 
-fn spans_to_string(spans: &[Span]) -> String {
-    spans
-        .iter()
-        .map(|s| s.content.clone())
-        .collect::<Vec<_>>()
-        .concat()
-}
-
-fn style_line_from_markdown(line: &str) -> Line<'static> {
-    Line::from(render_inline_markdown(line))
-}
-
 fn wrap_text(text: &str, width: usize) -> Vec<String> {
     if width <= 2 {
         return text.lines().map(|s| s.to_string()).collect();
@@ -1447,21 +1436,28 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
 }
 
 fn wrap_line(line: &str, width: usize, result: &mut Vec<String>) {
-    let mut remaining = line;
-    while !remaining.is_empty() {
-        if remaining.len() <= width {
-            result.push(remaining.to_string());
-            break;
-        }
-        let boundary = width.min(remaining.len());
-        let mut split_at = boundary;
-        if let Some(space_idx) = remaining[..boundary].rfind(' ') {
-            if space_idx > 0 {
-                split_at = space_idx;
+    let chars: Vec<char> = line.chars().collect();
+    if chars.len() <= width {
+        result.push(line.to_string());
+        return;
+    }
+    let mut start = 0;
+    while start < chars.len() {
+        let end = (start + width).min(chars.len());
+        let mut split = end;
+        if end < chars.len() {
+            if let Some(rel) = chars[start..end].iter().rposition(|&c| c == ' ') {
+                if rel > 0 {
+                    split = start + rel;
+                }
             }
         }
-        result.push(remaining[..split_at].to_string());
-        remaining = remaining[split_at..].trim_start();
+        let segment: String = chars[start..split].iter().collect();
+        result.push(segment.trim_end().to_string());
+        start = split;
+        while start < chars.len() && chars[start] == ' ' {
+            start += 1;
+        }
     }
 }
 
@@ -1480,7 +1476,7 @@ fn draw_input(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(&input, area);
 
     if !app.streaming {
-        frame.set_cursor_position((area.x + app.input.cursor().0 as u16 + 1, area.y));
+        frame.set_cursor_position((area.x + app.input.cursor().1 as u16 + 1, area.y));
     }
 }
 
@@ -1499,34 +1495,22 @@ fn model_context_limit(model: &str) -> u64 {
     let provider = model.split('/').next().unwrap_or("");
     let model_lower = model.to_lowercase();
     match provider {
-        "deepseek" => {
-            if model_lower.contains("v4") {
-                1_048_576
-            } else {
-                131_072
-            }
-        }
-        "anthropic" => {
-            if model_lower.contains("haiku") {
-                200_000
-            } else {
-                1_048_576
-            }
-        }
+        "deepseek" => 128_000,
+        "anthropic" => 200_000,
         "openai" => {
-            if model_lower.contains("mini") || model_lower.contains("nano") {
-                400_000
+            if model_lower.contains("gpt-4.1") {
+                1_047_576
             } else {
-                1_048_576
+                128_000
             }
         }
         "openrouter" => 131_072,
-        "ollama" => 4_096,
-        _ => 131_072,
+        "ollama" => 8_192,
+        _ => 128_000,
     }
 }
 
-fn highlight_code(lines: &[String], language: &str) -> Vec<String> {
+fn highlight_code(lines: &[String], language: &str) -> Vec<Line<'static>> {
     let ss = get_syntax_set();
     let syntax = ss
         .find_syntax_by_token(language)
@@ -1538,15 +1522,20 @@ fn highlight_code(lines: &[String], language: &str) -> Vec<String> {
     let mut result = Vec::new();
 
     for line in lines {
-        if let Ok(ranges) = highlighter.highlight_line(line, ss) {
-            let styled: String = ranges
-                .iter()
-                .map(|(_style, text)| text.to_string())
-                .collect();
-            result.push(styled);
-        } else {
-            result.push(line.clone());
+        let mut spans: Vec<Span<'static>> = vec![Span::raw("  ")];
+        match highlighter.highlight_line(line, ss) {
+            Ok(ranges) => {
+                for (style, text) in ranges {
+                    let fg = style.foreground;
+                    spans.push(Span::styled(
+                        text.to_string(),
+                        Style::default().fg(Color::Rgb(fg.r, fg.g, fg.b)),
+                    ));
+                }
+            }
+            Err(_) => spans.push(Span::styled(line.clone(), Style::default().fg(Color::Gray))),
         }
+        result.push(Line::from(spans));
     }
     result
 }
