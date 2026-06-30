@@ -592,7 +592,7 @@ impl Agent {
                 .replace("{shell_sep}", shell_sep)
         });
 
-        if let Some(ref repomap) = self.repomap {
+        if let (Some(ref repomap), false) = (&self.repomap, self.config.no_repomap) {
             system_prompt.push_str("\n\n---\n\n");
             system_prompt.push_str(&repomap.format_context());
         }
