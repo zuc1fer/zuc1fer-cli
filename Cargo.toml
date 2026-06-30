@@ -1,18 +1,18 @@
 [package]
-name = "zuc1fer"
+name = "ophis"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "zuc1fer"
+name = "ophis"
 path = "src/main.rs"
 
 [dependencies]
-zuc1fer-core = { path = "crates/zuc1fer-core" }
-zuc1fer-llm = { path = "crates/zuc1fer-llm" }
-zuc1fer-tools = { path = "crates/zuc1fer-tools" }
-zuc1fer-tui = { path = "crates/zuc1fer-tui" }
+ophis-core = { path = "crates/ophis-core" }
+ophis-llm = { path = "crates/ophis-llm" }
+ophis-tools = { path = "crates/ophis-tools" }
+ophis-tui = { path = "crates/ophis-tui" }
 tokio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
@@ -21,23 +21,24 @@ uuid.workspace = true
 ratatui = "0.29"
 crossterm = "0.28"
 serde_json.workspace = true
+async-trait.workspace = true
 
 [workspace]
 resolver = "2"
 members = [
-    "crates/zuc1fer-core",
-    "crates/zuc1fer-tools",
-    "crates/zuc1fer-llm",
-    "crates/zuc1fer-tui",
-    "crates/zuc1fer-mcp",
+    "crates/ophis-core",
+    "crates/ophis-tools",
+    "crates/ophis-llm",
+    "crates/ophis-tui",
+    "crates/ophis-mcp",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-authors = ["zuc1fer"]
-repository = "https://github.com/zuc1fer/zuc1fer-cli"
+authors = ["ophis"]
+repository = "https://github.com/zuc1fer/ophis"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }

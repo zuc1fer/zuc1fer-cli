@@ -1,4 +1,4 @@
-# Zuc1fer CLI — Competitive Architecture Plan
+# ophis CLI — Competitive Architecture Plan
 
 ## Executive Summary
 
@@ -95,10 +95,10 @@ All models available. User picks one. We adapt tool schemas, caching strategy, a
 
 ### Provider abstraction — how it works
 ```rust
-// User runs: zuc1fer --model deepseek/deepseek-v4-pro
-//              zuc1fer --model anthropic/claude-sonnet-4-20250514
-//              zuc1fer --model openai/gpt-4o
-//              zuc1fer --model ollama/qwen2.5-coder:32b
+// User runs: ophis --model deepseek/deepseek-v4-pro
+//              ophis --model anthropic/claude-sonnet-4-20250514
+//              ophis --model openai/gpt-4o
+//              ophis --model ollama/qwen2.5-coder:32b
 
 trait LlmProvider {
     async fn stream(&self, req: ChatRequest) -> Result<StreamHandle>;
@@ -127,7 +127,7 @@ trait LlmProvider {
 **Rust for the engine. TypeScript for plugins/config.**
 
 ```
-zuc1fer/
+ophis/
 ├── engine/          # Rust — all performance-critical code
 │   ├── core/        # Agent loop, session management
 │   ├── search/      # Code search engine (ast-grep + Tantivy + ripgrep fallback)
@@ -151,7 +151,7 @@ zuc1fer/
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                     ZUC1FER AGENT LOOP                        │
+│                     ophis AGENT LOOP                        │
 ├──────────────────────────────────────────────────────────────┤
 │  1. User prompt                                               │
 │  2. Context Assembly:                                         │
@@ -184,7 +184,7 @@ zuc1fer/
 ### 4.1 The Problem
 All three competitors do `rg pattern | head -n 100`. This is 1990s technology. When a model asks "find all React components that use useState and make an API call in useEffect", text grep can't help — the model has to read hundreds of files and reason about them itself. With structural search, the tool returns exactly what the model needs in one shot, saving dozens of turns.
 
-### 4.2 The Zuc1fer Search Stack
+### 4.2 The ophis Search Stack
 
 ```
 ┌────────────────────────────────────────────────────────────┐
@@ -252,7 +252,7 @@ On first run (or --index flag):
      c. Index chunks in Tantivy (BM25 full-text)
      d. Generate embeddings → store in Qdrant (semantic)
      e. Build dependency graph (file A imports from file B, function X calls function Y)
-  3. Persist to disk: ~/.zuc1fer/indexes/{sha256(repo_path)}/
+  3. Persist to disk: ~/.ophis/indexes/{sha256(repo_path)}/
   4. Watch mode: incremental update on file save
 
 On every turn:
@@ -364,7 +364,7 @@ Competitors:
   tool_call_3: read("src/app.tsx") → execute → wait
   Total: 3 sequential operations
 
-Zuc1fer:
+ophis:
   tool_call_1: grep("useState")    ─┐
   tool_call_2: grep("useEffect")   ─┼─ ALL RUN IN PARALLEL (tokio::join!)
   tool_call_3: read("src/app.tsx") ─┘
@@ -439,7 +439,7 @@ plugin/
 ## 10. PERSISTENCE
 
 - **SQLite** for session messages (proven by OpenCode)
-- **Disk-persisted codebase index**: `~/.zuc1fer/indexes/{hash}/`
+- **Disk-persisted codebase index**: `~/.ophis/indexes/{hash}/`
 - **Incremental indexing**: file watcher events trigger partial reindex
 - **TTL-based expiration**: reindex after 7 days or when tool config changes
 
@@ -490,7 +490,7 @@ plugin/
 
 ## 12. COMPETITIVE EDGE SUMMARY
 
-| Dimension | OpenCode | Codex | Claude Code | **Zuc1fer** |
+| Dimension | OpenCode | Codex | Claude Code | **ophis** |
 |-----------|----------|-------|-------------|-------------|
 | **Speed** | Medium (TS/Bun) | Fast (Rust) | Medium (Node) | **Fastest (Rust + parallel tools + native search)** |
 | **Code Search** | ripgrep text | ripgrep text | ripgrep text | **ast-grep structural + Tantivy BM25 + Qdrant embeddings** |

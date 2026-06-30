@@ -1,0 +1,27 @@
+{
+  "name": "ophis-cli",
+  "version": "1.0.0",
+  "description": "**A fast, multi-model CLI coding agent. Single Rust binary, structural + semantic search, MCP and LSP built in.**",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ophis.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/ophis/issues"
+  },
+  "homepage": "https://github.com/ophis#readme",
+  "dependencies": {
+    "playwright": "^1.61.1"
+  }
+}

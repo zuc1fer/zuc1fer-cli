@@ -3,14 +3,13 @@
 ## Crate Dependency Graph
 
 ```
-src/main.rs (CLI binary)
-  └── zuc1fer-core (agent, config, session)
-        ├── zuc1fer-tools (tool implementations + registry)
-        ├── zuc1fer-llm (provider abstraction)
-        │     └── providers/ (deepseek, anthropic, openai)
-        └── zuc1fer-search (ripgrep wrappers)
-
-zuc1fer-tui (terminal UI, placeholder)
+src/main.rs (CLI + TUI binary)
+  ├── ophis-core (agent, config, sessions, code index, RepoMap, LSP)
+  │     ├── ophis-tools (tool implementations + registry)
+  │     ├── ophis-llm (provider abstraction)
+  │     │     └── providers/ (deepseek, anthropic, openai, openrouter, ollama)
+  │     └── ophis-mcp (MCP client)
+  └── ophis-tui (ratatui terminal UI)
 ```
 
 ## Agent Loop
@@ -35,7 +34,7 @@ User prompt
 
 ## Tool Execution
 
-All tool calls from a single model response execute in parallel via `futures::future::join_all`. Each tool gets a fresh async task. Results are collected and injected back into the conversation as individual tool messages.
+Read-only tool calls from a single model response execute in parallel via `futures::future::join_all`; mutating tools (`write`/`edit`/`bash`) run sequentially to avoid races. Results are injected back into the conversation as individual tool messages.
 
 ## Provider Abstraction
 
@@ -57,4 +56,4 @@ Sessions are plain Rust structs (serde-serializable). Ready for SQLite persisten
 
 ## Config
 
-`~/.config/zuc1fer/config.toml` — TOML format, auto-created on first run. Supports per-provider API keys and base URL overrides (useful for proxies and OpenRouter).
+`~/.config/ophis/config.toml` — TOML format, auto-created on first run. Supports per-provider API keys and base URL overrides (useful for proxies and OpenRouter).
