@@ -105,19 +105,25 @@ impl RepoMap {
 
     fn build_dependency_graph(&mut self) {
         let mut edges: HashMap<String, Vec<String>> = HashMap::new();
+        let mut seen_files: HashSet<PathBuf> = HashSet::new();
 
         for sym in &self.symbols {
+            if !seen_files.insert(sym.file.clone()) {
+                continue;
+            }
             let file_str = sym.file.to_string_lossy().to_string();
             let content = std::fs::read_to_string(&sym.file).unwrap_or_default();
 
             let imports = self.extract_imports(&sym.file, &content);
-            let target_files: Vec<String> = imports
+            let mut target_files: Vec<String> = imports
                 .into_iter()
                 .filter_map(|import_path| {
                     self.resolve_import(&sym.file, &import_path)
                         .map(|p| p.to_string_lossy().to_string())
                 })
                 .collect();
+            target_files.sort();
+            target_files.dedup();
 
             edges
                 .entry(file_str.clone())
@@ -197,41 +203,52 @@ impl RepoMap {
     fn pagerank(&self, edges: &HashMap<String, Vec<String>>) -> HashMap<String, f64> {
         let damping: f64 = 0.85;
         let iterations = 20;
-        let mut scores: HashMap<String, f64> = HashMap::new();
 
-        let all_nodes: Vec<&String> = edges
-            .keys()
-            .chain(edges.values().flat_map(|v| v.iter()))
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
-
+        let mut node_set: HashSet<&str> = HashSet::new();
+        for (src, targets) in edges {
+            node_set.insert(src.as_str());
+            for t in targets {
+                node_set.insert(t.as_str());
+            }
+        }
+        let all_nodes: Vec<&str> = node_set.into_iter().collect();
         let n = all_nodes.len() as f64;
+        if n == 0.0 {
+            return HashMap::new();
+        }
         let base = (1.0 - damping) / n;
 
-        for node in &all_nodes {
-            scores.insert((*node).clone(), 1.0 / n);
+        let mut out_degree: HashMap<&str, f64> = HashMap::new();
+        let mut incoming: HashMap<&str, Vec<&str>> = HashMap::new();
+        for (src, targets) in edges {
+            out_degree.insert(src.as_str(), targets.len().max(1) as f64);
+            for t in targets {
+                incoming.entry(t.as_str()).or_default().push(src.as_str());
+            }
         }
 
-        for _ in 0..iterations {
-            let mut new_scores: HashMap<String, f64> = HashMap::new();
+        let mut scores: HashMap<&str, f64> = all_nodes.iter().map(|nd| (*nd, 1.0 / n)).collect();
 
+        for _ in 0..iterations {
+            let mut new_scores: HashMap<&str, f64> = HashMap::with_capacity(all_nodes.len());
             for node in &all_nodes {
                 let mut rank = base;
-                for (source, targets) in edges {
-                    if targets.contains(node) {
-                        let source_score = scores.get(source).copied().unwrap_or(0.0);
-                        let out_degree = targets.len().max(1) as f64;
-                        rank += damping * source_score / out_degree;
+                if let Some(sources) = incoming.get(node) {
+                    for src in sources {
+                        let src_score = scores.get(src).copied().unwrap_or(0.0);
+                        let od = out_degree.get(src).copied().unwrap_or(1.0);
+                        rank += damping * src_score / od;
                     }
                 }
-                new_scores.insert((*node).clone(), rank);
+                new_scores.insert(*node, rank);
             }
-
             scores = new_scores;
         }
 
         scores
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect()
     }
 
     fn rank_files(&mut self) {
