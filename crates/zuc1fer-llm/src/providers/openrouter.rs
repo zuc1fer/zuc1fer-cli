@@ -119,6 +119,7 @@ impl LlmProvider for OpenRouterProvider {
             "model": request.model,
             "messages": messages,
             "stream": true,
+            "stream_options": { "include_usage": true },
             "max_tokens": request.max_tokens,
         });
 
@@ -153,17 +154,23 @@ impl LlmProvider for OpenRouterProvider {
 
         use futures::StreamExt;
         let mut stream = response.bytes_stream();
+        let mut line_buf = crate::sse::LineBuffer::new();
         let mut text_buf = String::new();
         let mut current_tool_id: Option<String> = None;
         let mut current_tool_name = String::new();
         let mut current_tool_args = String::new();
         let mut usage = Usage::default();
 
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            let text = String::from_utf8_lossy(&chunk);
-
-            for line in text.lines() {
+        let mut stream_done = false;
+        while !stream_done {
+            let lines: Vec<String> = match stream.next().await {
+                Some(chunk) => line_buf.push(&chunk?),
+                None => {
+                    stream_done = true;
+                    line_buf.flush().into_iter().collect()
+                }
+            };
+            for line in lines {
                 let line = line.trim();
                 if line.is_empty() || line == "data: [DONE]" {
                     continue;
@@ -271,6 +278,6 @@ impl LlmProvider for OpenRouterProvider {
     }
 
     fn estimate_tokens(&self, text: &str) -> u64 {
-        (text.len() as u64 + 2) / 3
+        (text.len() as u64).div_ceil(3)
     }
 }
