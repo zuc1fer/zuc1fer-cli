@@ -68,7 +68,7 @@ impl McpClient {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {},
                     "clientInfo": {
-                        "name": "zuc1fer",
+                        "name": "ophis",
                         "version": env!("CARGO_PKG_VERSION"),
                     }
                 }),
