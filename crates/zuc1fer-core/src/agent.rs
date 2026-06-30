@@ -162,9 +162,19 @@ impl Agent {
         }
 
         let code_index = {
+            let repo_key = {
+                use std::hash::{Hash, Hasher};
+                let canon = working_dir
+                    .canonicalize()
+                    .unwrap_or_else(|_| working_dir.clone());
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                canon.to_string_lossy().hash(&mut hasher);
+                format!("{:016x}", hasher.finish())
+            };
             let index_dir = crate::default_data_dir()
                 .unwrap_or_else(|_| working_dir.join(".zuc1fer").join("index"))
-                .join("code_index");
+                .join("index")
+                .join(&repo_key);
             let ci = Arc::new(CodeIndex::open_or_create(&index_dir)?);
 
             if ci.file_count() == 0 {
@@ -250,7 +260,7 @@ impl Agent {
 
     fn emit_repomap(&self) {
         if let Some(ref repomap) = self.repomap {
-            let files: Vec<(&str, f64)> = repomap
+            let files: Vec<(String, f64)> = repomap
                 .file_rankings
                 .iter()
                 .map(|(path, score)| {
@@ -259,17 +269,9 @@ impl Agent {
                             .unwrap_or(path)
                             .display()
                             .to_string()
-                            .replace('\\', "/")
-                            .as_str()
-                            .to_owned(),
+                            .replace('\\', "/"),
                         *score,
                     )
-                })
-                .collect::<Vec<_>>()
-                .into_iter()
-                .map(|(s, f)| {
-                    let leaked: &'static str = Box::leak(s.into_boxed_str());
-                    (leaked, f)
                 })
                 .collect();
 
@@ -352,12 +354,17 @@ impl Agent {
         }
 
         let keep_count = 6;
-        let to_compact: Vec<_> = session
-            .messages
-            .iter()
-            .take(session.messages.len().saturating_sub(keep_count))
-            .cloned()
-            .collect();
+        let mut cut = session.messages.len().saturating_sub(keep_count);
+        while cut > 0
+            && session
+                .messages
+                .get(cut)
+                .map(|m| m.role == "tool")
+                .unwrap_or(false)
+        {
+            cut -= 1;
+        }
+        let to_compact: Vec<_> = session.messages.iter().take(cut).cloned().collect();
 
         if to_compact.is_empty() {
             return;
@@ -410,8 +417,8 @@ impl Agent {
         }
 
         let compacted_msg = SessionMessage {
-            role: "system".into(),
-            content: format!("[Compacted context]\n{summary}"),
+            role: "user".into(),
+            content: format!("[Compacted summary of earlier conversation]\n{summary}"),
             tool_calls: None,
             tool_results: None,
             timestamp: chrono::Utc::now().to_rfc3339(),
@@ -788,10 +795,17 @@ pub struct AgentResponse {
 
 fn model_context_for_compaction(model: &str) -> u64 {
     let lower = model.to_lowercase();
-    if lower.contains("v4") { 1_048_576 }
-    else if lower.contains("sonnet") || lower.contains("opus") || lower.contains("fable") { 1_048_576 }
-    else if lower.contains("haiku") { 200_000 }
-    else if lower.contains("gpt-5") || lower.contains("gpt-4") { 1_048_576 }
-    else if lower.contains("mini") || lower.contains("nano") { 400_000 }
-    else { 131_072 }
+    if lower.contains("gemini") {
+        1_048_576
+    } else if lower.contains("gpt-4.1") {
+        1_047_576
+    } else if lower.contains("claude")
+        || lower.contains("sonnet")
+        || lower.contains("opus")
+        || lower.contains("haiku")
+    {
+        200_000
+    } else {
+        128_000
+    }
 }
