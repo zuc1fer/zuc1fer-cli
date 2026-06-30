@@ -47,7 +47,7 @@ impl Tool for WebFetch {
         let timeout_secs = call.arguments["timeout"].as_u64().unwrap_or(30).min(120);
 
         let client = reqwest::Client::builder()
-            .user_agent("zuc1fer/1.0 (coding-agent)")
+            .user_agent("ophis/1.0 (coding-agent)")
             .timeout(std::time::Duration::from_secs(timeout_secs))
             .build()?;
 
