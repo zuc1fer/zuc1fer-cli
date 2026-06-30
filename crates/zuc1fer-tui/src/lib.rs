@@ -297,8 +297,7 @@ impl App {
     }
 
     pub fn update_cost(&mut self) {
-        let provider = self.model.split('/').next().unwrap_or("unknown");
-        let (price_in, price_out) = model_pricing(provider);
+        let (price_in, price_out) = model_pricing(&self.model);
         let in_cost = (self.tokens_in as f64 / 1_000_000.0) * price_in;
         let out_cost = (self.tokens_out as f64 / 1_000_000.0) * price_out;
         self.cost_usd = in_cost + out_cost;
@@ -1521,11 +1520,37 @@ fn draw_input(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-fn model_pricing(provider: &str) -> (f64, f64) {
+fn model_pricing(model: &str) -> (f64, f64) {
+    let (provider, name) = model.split_once('/').unwrap_or(("", model));
+    let m = name.to_lowercase();
     match provider {
-        "deepseek" => (0.435, 0.87),
-        "anthropic" => (3.0, 15.0),
-        "openai" => (2.50, 15.0),
+        "deepseek" => {
+            if m.contains("pro") {
+                (0.435, 0.87)
+            } else {
+                (0.14, 0.28)
+            }
+        }
+        "anthropic" => {
+            if m.contains("opus") {
+                (15.0, 75.0)
+            } else if m.contains("haiku") {
+                (0.80, 4.0)
+            } else {
+                (3.0, 15.0)
+            }
+        }
+        "openai" => {
+            if m.contains("nano") {
+                (0.10, 0.40)
+            } else if m.contains("mini") {
+                (0.15, 0.60)
+            } else if m.contains("4.1") {
+                (2.0, 8.0)
+            } else {
+                (2.50, 10.0)
+            }
+        }
         "openrouter" => (0.50, 1.50),
         "ollama" => (0.0, 0.0),
         _ => (1.0, 5.0),
@@ -1536,7 +1561,7 @@ fn model_context_limit(model: &str) -> u64 {
     let provider = model.split('/').next().unwrap_or("");
     let model_lower = model.to_lowercase();
     match provider {
-        "deepseek" => 128_000,
+        "deepseek" => 1_048_576,
         "anthropic" => 200_000,
         "openai" => {
             if model_lower.contains("gpt-4.1") {

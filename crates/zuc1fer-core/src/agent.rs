@@ -896,6 +896,8 @@ fn model_context_for_compaction(model: &str) -> u64 {
         1_048_576
     } else if lower.contains("gpt-4.1") {
         1_047_576
+    } else if lower.contains("deepseek") || lower.contains("v4") {
+        1_048_576
     } else if lower.contains("claude")
         || lower.contains("sonnet")
         || lower.contains("opus")
