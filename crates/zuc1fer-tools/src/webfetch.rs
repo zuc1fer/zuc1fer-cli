@@ -45,7 +45,6 @@ impl Tool for WebFetch {
             url.to_string()
         };
 
-        let format = call.arguments["format"].as_str().unwrap_or("text");
         let timeout_secs = call.arguments["timeout"].as_u64().unwrap_or(30).min(120);
 
         let client = reqwest::Client::builder()
@@ -75,26 +74,15 @@ impl Tool for WebFetch {
                 }
 
                 let output = if content_type.contains("text/html") {
-                    let rendered = match format {
-                        "markdown" => html2text::from_read(body.as_bytes(), url.len()),
-                        _ => html2text::from_read(body.as_bytes(), url.len()),
-                    };
-                    if rendered.len() > 20_000 {
-                        format!("{}\n\n[truncated: {} total chars]", &rendered[..20_000], rendered.len())
-                    } else {
-                        rendered
-                    }
+                    let rendered = html2text::from_read(body.as_bytes(), 100);
+                    truncate_chars(&rendered, 20_000)
                 } else if content_type.contains("image/") || content_type.contains("video/")
                     || content_type.contains("audio/") || content_type.contains("application/pdf")
                     || content_type.contains("application/octet-stream")
                 {
                     format!("[Binary content: {}]", content_type)
                 } else {
-                    if body.len() > 20_000 {
-                        format!("{}\n\n[truncated: {} total chars]", &body[..20_000], body.len())
-                    } else {
-                        body
-                    }
+                    truncate_chars(&body, 20_000)
                 };
 
                 Ok(ToolResult::success(&call.id, output))
@@ -105,4 +93,13 @@ impl Tool for WebFetch {
             )),
         }
     }
+}
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    let total = s.chars().count();
+    if total <= max {
+        return s.to_string();
+    }
+    let shown: String = s.chars().take(max).collect();
+    format!("{shown}\n\n[truncated: {total} total chars]")
 }

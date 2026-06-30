@@ -5,6 +5,8 @@ use tokio::io::AsyncReadExt;
 
 pub struct BashTool;
 
+const MAX_OUTPUT_BYTES: usize = 100_000;
+
 #[async_trait::async_trait]
 impl Tool for BashTool {
     fn definition(&self) -> ToolDef {
@@ -69,6 +71,7 @@ impl Tool for BashTool {
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
+                .kill_on_drop(true)
                 .spawn()?
         } else {
             Command::new("sh")
@@ -78,26 +81,31 @@ impl Tool for BashTool {
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
+                .kill_on_drop(true)
                 .spawn()?
         };
 
         let timeout = tokio::time::Duration::from_millis(timeout_ms);
+        let mut stdout_pipe = child.stdout.take();
+        let mut stderr_pipe = child.stderr.take();
         let result = tokio::time::timeout(timeout, async {
-            let stdout = {
+            let read_out = async {
                 let mut buf = Vec::new();
-                if let Some(mut out) = child.stdout.take() {
+                if let Some(out) = stdout_pipe.as_mut() {
                     out.read_to_end(&mut buf).await?;
                 }
-                String::from_utf8_lossy(&buf).to_string()
+                anyhow::Ok(buf)
             };
-
-            let stderr = {
+            let read_err = async {
                 let mut buf = Vec::new();
-                if let Some(mut err) = child.stderr.take() {
+                if let Some(err) = stderr_pipe.as_mut() {
                     err.read_to_end(&mut buf).await?;
                 }
-                String::from_utf8_lossy(&buf).to_string()
+                anyhow::Ok(buf)
             };
+            let (out_res, err_res) = tokio::join!(read_out, read_err);
+            let stdout = String::from_utf8_lossy(&out_res?).to_string();
+            let stderr = String::from_utf8_lossy(&err_res?).to_string();
 
             let status = child.wait().await?;
             anyhow::Ok((stdout, stderr, status.code()))
@@ -119,6 +127,17 @@ impl Tool for BashTool {
                 }
                 if output.is_empty() {
                     output = format!("Command completed with exit code: {}", code.unwrap_or(-1));
+                }
+                if output.len() > MAX_OUTPUT_BYTES {
+                    let mut end = MAX_OUTPUT_BYTES;
+                    while end > 0 && !output.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    let total = output.len();
+                    output.truncate(end);
+                    output.push_str(&format!(
+                        "\n\n[output truncated: {end} of {total} bytes shown]"
+                    ));
                 }
                 Ok(ToolResult::success(&call.id, output))
             }
