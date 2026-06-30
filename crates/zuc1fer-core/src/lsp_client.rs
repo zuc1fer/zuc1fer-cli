@@ -1,5 +1,5 @@
 use lsp_types::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
@@ -13,6 +13,7 @@ struct LspConnection {
     writer: Arc<Mutex<tokio::io::BufWriter<tokio::process::ChildStdin>>>,
     next_id: AtomicI64,
     responses: Arc<Mutex<HashMap<i64, serde_json::Value>>>,
+    opened: Mutex<HashSet<String>>,
 }
 
 pub struct LspClient {
@@ -36,6 +37,7 @@ impl LspClient {
     ) -> anyhow::Result<Vec<String>> {
         let lang = language_from_extension(file_path);
         let conn = self.get_or_start_connection(&lang).await?;
+        self.ensure_open(conn.clone(), file_path).await?;
         let file_uri = path_to_uri(file_path);
         let uri: Uri = file_uri.parse().map_err(|e| anyhow::anyhow!("invalid uri: {e}"))?;
 
@@ -81,6 +83,7 @@ impl LspClient {
     ) -> anyhow::Result<Vec<String>> {
         let lang = language_from_extension(file_path);
         let conn = self.get_or_start_connection(&lang).await?;
+        self.ensure_open(conn.clone(), file_path).await?;
         let file_uri = path_to_uri(file_path);
         let uri: Uri = file_uri.parse().map_err(|e| anyhow::anyhow!("invalid uri: {e}"))?;
 
@@ -118,6 +121,7 @@ impl LspClient {
     ) -> anyhow::Result<String> {
         let lang = language_from_extension(file_path);
         let conn = self.get_or_start_connection(&lang).await?;
+        self.ensure_open(conn.clone(), file_path).await?;
         let file_uri = path_to_uri(file_path);
         let uri: Uri = file_uri.parse().map_err(|e| anyhow::anyhow!("invalid uri: {e}"))?;
 
@@ -150,9 +154,7 @@ impl LspClient {
         let file_uri = path_to_uri(file_path);
         let uri: Uri = file_uri.parse().map_err(|e| anyhow::anyhow!("invalid uri: {e}"))?;
 
-        self.did_open(conn.clone(), file_path).await?;
-
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        self.ensure_open(conn.clone(), file_path).await?;
 
         let params = DocumentDiagnosticParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
@@ -233,6 +235,19 @@ impl LspClient {
 
         self.send_notification(conn, "textDocument/didOpen", serde_json::to_value(&params)?)
             .await
+    }
+
+    async fn ensure_open(&self, conn: Arc<LspConnection>, file_path: &str) -> anyhow::Result<()> {
+        {
+            let opened = conn.opened.lock().await;
+            if opened.contains(file_path) {
+                return Ok(());
+            }
+        }
+        self.did_open(conn.clone(), file_path).await?;
+        conn.opened.lock().await.insert(file_path.to_string());
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        Ok(())
     }
 
     async fn send_request(
@@ -373,6 +388,7 @@ async fn start_lsp_server(
         writer: writer.clone(),
         next_id: AtomicI64::new(1),
         responses,
+        opened: Mutex::new(HashSet::new()),
     });
 
     let init_params = serde_json::json!({
