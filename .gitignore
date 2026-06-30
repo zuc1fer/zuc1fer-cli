@@ -14,6 +14,10 @@
 .DS_Store
 Thumbs.db
 
+# Node / Playwright (used for image-to-ASCII on asciiart.eu)
+node_modules/
+.playwright-mcp/
+
 # Env
 .env
 .env.local

@@ -1,8 +1,8 @@
 use std::sync::Arc;
-use zuc1fer_core::agent::{Agent, AgentEvent, ApprovalDecision, Approver};
-use zuc1fer_core::config::Config;
-use zuc1fer_core::session::Session;
-use zuc1fer_core::session_store::SessionStore;
+use ophis_core::agent::{Agent, AgentEvent, ApprovalDecision, Approver};
+use ophis_core::config::Config;
+use ophis_core::session::Session;
+use ophis_core::session_store::SessionStore;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -59,7 +59,7 @@ impl Approver for CliApprover {
 pub fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            std::env::var("ZUC1FER_LOG").unwrap_or_else(|_| "info,tantivy=warn,notify=warn".into()),
+            std::env::var("OPHIS_LOG").unwrap_or_else(|_| "info,tantivy=warn,notify=warn".into()),
         )
         .init();
 
@@ -106,7 +106,7 @@ pub fn main() -> anyhow::Result<()> {
             }
         }
         "config" => show_config()?,
-        "--version" | "-V" => println!("zuc1fer v{VERSION}"),
+        "--version" | "-V" => println!("ophis v{VERSION}"),
         "--help" | "-h" => print_usage(&args[0]),
         cmd => {
             eprintln!("Unknown command: {cmd}");
@@ -129,7 +129,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     use ratatui::backend::CrosstermBackend;
     use ratatui::Terminal;
     use std::sync::Arc;
-    use zuc1fer_tui::App;
+    use ophis_tui::App;
 
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -242,7 +242,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                 AgentEvent::Sessions(metas) => {
                     app.sessions = metas
                         .into_iter()
-                        .map(|m| zuc1fer_tui::SessionInfo {
+                        .map(|m| ophis_tui::SessionInfo {
                             id: m.id,
                             model: m.model,
                             message_count: m.message_count,
@@ -259,7 +259,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
             pending_reply = Some(req.reply);
         }
 
-        terminal.draw(|f| zuc1fer_tui::draw(f, &app))?;
+        terminal.draw(|f| ophis_tui::draw(f, &app))?;
 
         if !app.running {
             break;
@@ -328,7 +328,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                                         model_name
                                     ));
                                 } else if let Some(sid) = cmd.strip_prefix("__SESSION_SELECT__:") {
-                                    app.add_system_message(format!("Session selected: {sid}. Use 'zuc1fer session resume {sid}' to resume."));
+                                    app.add_system_message(format!("Session selected: {sid}. Use 'ophis session resume {sid}' to resume."));
                                 } else {
                                     handle_palette_command(&mut app, &cmd);
                                 }
@@ -394,7 +394,7 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
     let provider_config = config
         .providers
         .get(provider)
-        .ok_or_else(|| anyhow::anyhow!("No config for provider '{provider}'. Set {provider}_API_KEY or add to ~/.config/zuc1fer/config.toml"))?;
+        .ok_or_else(|| anyhow::anyhow!("No config for provider '{provider}'. Set {provider}_API_KEY or add to ~/.config/ophis/config.toml"))?;
 
     if provider_config.api_key.is_empty() {
         anyhow::bail!(
@@ -415,7 +415,7 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
     );
 
     if let Some(prompt) = one_shot_prompt {
-        println!("zuc1fer v{VERSION}  |  model: {}", session.model);
+        println!("ophis v{VERSION}  |  model: {}", session.model);
         let result = rt.block_on(agent.run(&mut session, &prompt));
         match result {
             Ok(response) => {
@@ -440,7 +440,7 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    println!("zuc1fer v{VERSION}  |  model: {model}");
+    println!("ophis v{VERSION}  |  model: {model}");
     println!("Type /help for commands, /quit to exit.\n");
 
     loop {
@@ -535,7 +535,7 @@ fn list_models() -> anyhow::Result<()> {
 }
 
 fn open_store() -> anyhow::Result<SessionStore> {
-    let dir = zuc1fer_core::default_data_dir()?;
+    let dir = ophis_core::default_data_dir()?;
     let db_path = dir.join("sessions.db");
     SessionStore::new(&db_path)
 }
@@ -611,7 +611,7 @@ fn resume_session(id: &str) -> anyhow::Result<()> {
 }
 
 fn show_config() -> anyhow::Result<()> {
-    let config_dir = zuc1fer_core::default_config_dir()?;
+    let config_dir = ophis_core::default_config_dir()?;
     let config_path = config_dir.join("config.toml");
 
     if config_path.exists() {
@@ -626,7 +626,7 @@ fn show_config() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_palette_command(app: &mut zuc1fer_tui::App, cmd: &str) {
+fn handle_palette_command(app: &mut ophis_tui::App, cmd: &str) {
     match cmd {
         "/quit" | "/q" => app.running = false,
         "/clear" => {
@@ -660,7 +660,7 @@ fn handle_palette_command(app: &mut zuc1fer_tui::App, cmd: &str) {
             );
         }
         "/config" => {
-            let dir = zuc1fer_core::default_config_dir().unwrap_or_default();
+            let dir = ophis_core::default_config_dir().unwrap_or_default();
             app.add_system_message(format!("Config directory: {}", dir.display()));
         }
         "/session" => {
@@ -674,7 +674,7 @@ fn handle_palette_command(app: &mut zuc1fer_tui::App, cmd: &str) {
 }
 
 fn print_usage(bin: &str) {
-    println!("zuc1fer v{VERSION} — the coding agent CLI\n");
+    println!("ophis v{VERSION} — the coding agent CLI\n");
     println!("Usage:");
     println!("  {bin} chat [--model=provider/model] [--tui] [--safe]");
     println!("  {bin} models");
@@ -690,7 +690,7 @@ fn print_usage(bin: &str) {
     println!("  DEEPSEEK_API_KEY   DeepSeek API key");
     println!("  ANTHROPIC_API_KEY  Anthropic API key");
     println!("  OPENAI_API_KEY     OpenAI API key");
-    println!("  ZUC1FER_LOG        Log level (trace, debug, info, warn, error)");
+    println!("  OPHIS_LOG        Log level (trace, debug, info, warn, error)");
 }
 
 fn print_session_help() {
