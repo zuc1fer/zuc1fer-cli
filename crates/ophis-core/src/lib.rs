@@ -21,7 +21,7 @@ pub fn default_config_dir() -> anyhow::Result<PathBuf> {
     let dir = dirs::home_dir()
         .context("Could not find home directory")?
         .join(".config")
-        .join("zuc1fer");
+        .join("OPHIS");
     if !dir.exists() {
         std::fs::create_dir_all(&dir)?;
     }

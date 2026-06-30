@@ -1,6 +1,6 @@
 use std::process::Stdio;
 use tokio::io::AsyncWriteExt;
-use zuc1fer_tools::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
+use ophis_tools::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
 
 pub struct PluginTool {
     name: String,

@@ -105,7 +105,7 @@ impl Indexer {
 
             for path in &event.paths {
                 let path_str = path.to_string_lossy();
-                if path_str.contains(".zuc1fer")
+                if path_str.contains(".OPHIS")
                     || path_str.contains(".git")
                     || path_str.contains("target")
                 {

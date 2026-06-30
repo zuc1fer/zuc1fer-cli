@@ -12,13 +12,13 @@ use crate::session_store::SessionStore;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use zuc1fer_llm::{ChatRequest, ProviderRegistry, StreamEvent, ToolDefinition};
-use zuc1fer_tools::{ToolCall, ToolContext, ToolRegistry, ToolResult};
+use ophis_llm::{ChatRequest, ProviderRegistry, StreamEvent, ToolDefinition};
+use ophis_tools::{ToolCall, ToolContext, ToolRegistry, ToolResult};
 
 const MAX_RETRIES: u32 = 3;
 const BASE_BACKOFF_MS: u64 = 1000;
 
-const SYSTEM_PROMPT: &str = r#"You are zuc1fer, a fast and capable CLI coding agent operating directly in the user's terminal and filesystem. The user is a professional developer and is the authority on what they want — act on their behalf decisively and without friction.
+const SYSTEM_PROMPT: &str = r#"You are ophis, a fast and capable CLI coding agent operating directly in the user's terminal and filesystem. The user is a professional developer and is the authority on what they want — act on their behalf decisively and without friction.
 
 <OPERATING_PRINCIPLES>
 - Be direct and concise. Answer in 1-3 lines unless the task genuinely requires more or the user asks for detail. No preamble, no filler, no moralizing.
@@ -104,7 +104,7 @@ impl Agent {
             if !provider_config.api_key.is_empty() {
                 match name.as_str() {
                     "deepseek" => {
-                        let mut p = zuc1fer_llm::providers::deepseek::DeepSeekProvider::new(
+                        let mut p = ophis_llm::providers::deepseek::DeepSeekProvider::new(
                             provider_config.api_key.clone(),
                         );
                         if let Some(ref url) = provider_config.base_url {
@@ -114,13 +114,13 @@ impl Agent {
                     }
                     "anthropic" => {
                         provider_registry.register(Box::new(
-                            zuc1fer_llm::providers::anthropic::AnthropicProvider::new(
+                            ophis_llm::providers::anthropic::AnthropicProvider::new(
                                 provider_config.api_key.clone(),
                             ),
                         ));
                     }
                     "openai" => {
-                        let mut p = zuc1fer_llm::providers::openai::OpenAIProvider::new(
+                        let mut p = ophis_llm::providers::openai::OpenAIProvider::new(
                             provider_config.api_key.clone(),
                         );
                         if let Some(ref url) = provider_config.base_url {
@@ -131,14 +131,14 @@ impl Agent {
                     "openrouter" => {
                         if !provider_config.api_key.is_empty() {
                             provider_registry.register(Box::new(
-                                zuc1fer_llm::providers::openrouter::OpenRouterProvider::new(
+                                ophis_llm::providers::openrouter::OpenRouterProvider::new(
                                     provider_config.api_key.clone(),
                                 ),
                             ));
                         }
                     }
                     "ollama" => {
-                        let mut p = zuc1fer_llm::providers::ollama::OllamaProvider::new();
+                        let mut p = ophis_llm::providers::ollama::OllamaProvider::new();
                         if let Some(ref url) = provider_config.base_url {
                             p = p.with_base_url(url);
                         }
@@ -191,7 +191,7 @@ impl Agent {
                 format!("{:016x}", hasher.finish())
             };
             let index_dir = crate::default_data_dir()
-                .unwrap_or_else(|_| working_dir.join(".zuc1fer").join("index"))
+                .unwrap_or_else(|_| working_dir.join(".OPHIS").join("index"))
                 .join("index")
                 .join(&repo_key);
             let ci = Arc::new(CodeIndex::open_or_create(&index_dir)?);
@@ -334,7 +334,7 @@ impl Agent {
         }
     }
 
-    pub fn add_tool(&mut self, tool: Arc<dyn zuc1fer_tools::Tool>) {
+    pub fn add_tool(&mut self, tool: Arc<dyn ophis_tools::Tool>) {
         self.tool_registry.register(tool);
     }
 
@@ -387,7 +387,7 @@ impl Agent {
     async fn maybe_compact(
         &self,
         session: &mut Session,
-        provider: &Arc<dyn zuc1fer_llm::LlmProvider>,
+        provider: &Arc<dyn ophis_llm::LlmProvider>,
         model_name: &str,
     ) {
         let context_limit: u64 = model_context_for_compaction(model_name);
@@ -436,9 +436,9 @@ impl Agent {
         let request = ChatRequest {
             model: model_name.to_string(),
             system: "You are a context summarizer. Output only the summary, no preamble.".into(),
-            messages: vec![zuc1fer_llm::Message {
-                role: zuc1fer_llm::Role::User,
-                content: vec![zuc1fer_llm::ContentBlock::Text {
+            messages: vec![ophis_llm::Message {
+                role: ophis_llm::Role::User,
+                content: vec![ophis_llm::ContentBlock::Text {
                     text: compact_prompt,
                 }],
             }],
@@ -568,7 +568,7 @@ impl Agent {
         let supports_caching = provider.supports_prompt_caching();
 
         let mut turn_count = 0;
-        let mut accumulated_usage = zuc1fer_llm::Usage::default();
+        let mut accumulated_usage = ophis_llm::Usage::default();
 
         loop {
             turn_count += 1;
@@ -838,7 +838,7 @@ impl Agent {
 pub struct AgentResponse {
     pub text: String,
     pub tool_calls: Vec<ToolCall>,
-    pub usage: Option<zuc1fer_llm::Usage>,
+    pub usage: Option<ophis_llm::Usage>,
 }
 
 fn approval_detail(tool: &str, args: &serde_json::Value) -> String {

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use zuc1fer_llm::Role;
+use ophis_llm::Role;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
@@ -40,7 +40,7 @@ impl Session {
         self.updated_at = chrono::Utc::now().to_rfc3339();
     }
 
-    pub fn to_llm_messages(&self) -> Vec<zuc1fer_llm::Message> {
+    pub fn to_llm_messages(&self) -> Vec<ophis_llm::Message> {
         self.messages
             .iter()
             .flat_map(|m| {
@@ -61,9 +61,9 @@ impl Session {
                                     let content =
                                         result["content"].as_str().unwrap_or("").to_string();
                                     let is_error = result["is_error"].as_bool().unwrap_or(false);
-                                    zuc1fer_llm::Message {
+                                    ophis_llm::Message {
                                         role: Role::Tool,
-                                        content: vec![zuc1fer_llm::ContentBlock::tool_result(
+                                        content: vec![ophis_llm::ContentBlock::tool_result(
                                             id, content, is_error,
                                         )],
                                     }
@@ -72,18 +72,18 @@ impl Session {
                         })
                         .unwrap_or_default()
                 } else {
-                    let mut blocks = vec![zuc1fer_llm::ContentBlock::text(&m.content)];
+                    let mut blocks = vec![ophis_llm::ContentBlock::text(&m.content)];
 
                     if let Some(tc) = &m.tool_calls {
                         for call in tc {
                             let id = call["id"].as_str().unwrap_or("").to_string();
                             let name = call["name"].as_str().unwrap_or("").to_string();
                             let input = call["input"].clone();
-                            blocks.push(zuc1fer_llm::ContentBlock::tool_use(id, name, input));
+                            blocks.push(ophis_llm::ContentBlock::tool_use(id, name, input));
                         }
                     }
 
-                    vec![zuc1fer_llm::Message {
+                    vec![ophis_llm::Message {
                         role,
                         content: blocks,
                     }]

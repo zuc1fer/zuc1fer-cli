@@ -1,5 +1,5 @@
 [package]
-name = "zuc1fer-core"
+name = "ophis-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -19,9 +19,9 @@ dirs.workspace = true
 futures.workspace = true
 toml.workspace = true
 
-zuc1fer-tools = { path = "../zuc1fer-tools" }
-zuc1fer-llm = { path = "../zuc1fer-llm" }
-zuc1fer-mcp = { path = "../zuc1fer-mcp" }
+ophis-tools = { path = "../ophis-tools" }
+ophis-llm = { path = "../ophis-llm" }
+ophis-mcp = { path = "../ophis-mcp" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tree-sitter = "0.25"
 tree-sitter-rust = "0.23"

@@ -1,6 +1,6 @@
 use std::sync::Arc;
-use zuc1fer_mcp::ToolInfo;
-use zuc1fer_tools::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
+use ophis_mcp::ToolInfo;
+use ophis_tools::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
 
 use crate::mcp_bridge::McpBridge;
 

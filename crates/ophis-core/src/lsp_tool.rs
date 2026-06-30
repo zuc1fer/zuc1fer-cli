@@ -1,6 +1,6 @@
 use crate::lsp_client::LspClient;
 use std::sync::Arc;
-use zuc1fer_tools::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
+use ophis_tools::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
 
 pub struct LspTool {
     client: Arc<LspClient>,

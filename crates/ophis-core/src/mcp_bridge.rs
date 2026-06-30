@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use zuc1fer_mcp::{CallToolResult, McpClient, ToolInfo};
+use ophis_mcp::{CallToolResult, McpClient, ToolInfo};
 
 pub struct McpBridge {
     client: Arc<Mutex<McpClient>>,
@@ -35,10 +35,10 @@ impl McpBridge {
         &self.tools
     }
 
-    pub fn tool_definitions(&self) -> Vec<zuc1fer_tools::ToolDef> {
+    pub fn tool_definitions(&self) -> Vec<ophis_tools::ToolDef> {
         self.tools
             .iter()
-            .map(|t| zuc1fer_tools::ToolDef {
+            .map(|t| ophis_tools::ToolDef {
                 name: format!(
                     "mcp__{}_{}",
                     self.server_name.replace(['-', ' '], "_"),

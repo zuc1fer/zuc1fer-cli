@@ -1,6 +1,6 @@
 use crate::code_index::CodeIndex;
 use std::sync::Arc;
-use zuc1fer_tools::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
+use ophis_tools::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
 
 pub struct SemanticTool {
     index: Arc<CodeIndex>,

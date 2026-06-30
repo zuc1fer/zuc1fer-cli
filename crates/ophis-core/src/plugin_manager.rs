@@ -1,7 +1,7 @@
 use crate::plugin_tool::PluginTool;
 use serde::Deserialize;
 use std::sync::Arc;
-use zuc1fer_tools::ToolRegistry;
+use ophis_tools::ToolRegistry;
 
 #[derive(Debug, Deserialize)]
 struct PluginManifest {
