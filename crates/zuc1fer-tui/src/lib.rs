@@ -14,6 +14,9 @@ use std::collections::VecDeque;
 use std::sync::OnceLock;
 use tui_textarea::TextArea;
 
+mod theme;
+use theme::*;
+
 static SYNTAX_SET: OnceLock<syntect::parsing::SyntaxSet> = OnceLock::new();
 static THEME: OnceLock<syntect::highlighting::Theme> = OnceLock::new();
 
@@ -24,7 +27,11 @@ fn get_syntax_set() -> &'static syntect::parsing::SyntaxSet {
 fn get_theme() -> &'static syntect::highlighting::Theme {
     THEME.get_or_init(|| {
         let ts = syntect::highlighting::ThemeSet::load_defaults();
-        ts.themes["base16-ocean.dark"].clone()
+        ts.themes
+            .get("dracula")
+            .or_else(|| ts.themes.get("base16-mocha.dark"))
+            .cloned()
+            .unwrap_or_else(|| ts.themes["base16-ocean.dark"].clone())
     })
 }
 
@@ -528,52 +535,30 @@ impl App {
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(2),
-            Constraint::Length(1),
-            Constraint::Min(4),
-            Constraint::Length(3),
-        ])
-        .split(area);
+    let chunks = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Min(4),
+        Constraint::Length(3),
+    ])
+    .split(area);
 
     draw_header(frame, chunks[0], app);
 
-    let status_text = if app.streaming {
-        " ● Streaming...  (Esc to cancel)"
-    } else if app.status != "Ready" {
-        &app.status
-    } else {
-        ""
-    };
-    let status_style = if app.streaming || app.status != "Ready" {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default()
-    };
-    frame.render_widget(
-        Paragraph::new(format!(" {status_text}")).style(status_style),
-        chunks[1],
-    );
+    let body = chunks[1];
 
-    let msg_area = chunks[2];
-
-    if app.show_repo_panel && msg_area.width > 35 {
-        let h_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
-            .split(msg_area);
+    if app.show_repo_panel && body.width > 44 {
+        let h_chunks =
+            Layout::horizontal([Constraint::Min(20), Constraint::Length(34)]).split(body);
 
         app.view_height.set(h_chunks[0].height as usize);
         draw_messages(frame, h_chunks[0], app);
         draw_sidebar(frame, h_chunks[1], app);
     } else {
-        app.view_height.set(msg_area.height as usize);
-        draw_messages(frame, msg_area, app);
+        app.view_height.set(body.height as usize);
+        draw_messages(frame, body, app);
     }
 
-    draw_input(frame, chunks[3], app);
+    draw_input(frame, chunks[2], app);
 
     if app.palette_open {
         draw_command_palette(frame, app);
@@ -624,12 +609,52 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         String::new()
     };
-    let text = format!(
-        "{} zuc1fer | {} | {}in {}out | {}{}{}",
-        spinner, app.model, app.tokens_in, app.tokens_out, app.status, scrolled, panel_indicator
-    );
+    let (dot_color, status_label): (Color, String) = if app.streaming {
+        (WARN, "streaming  ·  Esc to cancel".to_string())
+    } else {
+        (ACCENT, app.status.clone())
+    };
+
+    let sep = Span::styled("  ·  ", Style::default().fg(ACCENT_DIM));
+    let mut spans: Vec<Span> = Vec::new();
+    if !spinner.is_empty() {
+        spans.push(Span::styled(
+            format!("{spinner} "),
+            Style::default().fg(WARN),
+        ));
+    } else {
+        spans.push(Span::raw(" "));
+    }
+    spans.push(Span::styled("◆ ", Style::default().fg(ACCENT)));
+    spans.push(Span::styled("zuc1fer", accent_bold()));
+    spans.push(sep.clone());
+    spans.push(Span::styled(
+        app.model.clone(),
+        Style::default().fg(TEXT_DIM),
+    ));
+    spans.push(sep.clone());
+    spans.push(Span::styled("●", Style::default().fg(dot_color)));
+    spans.push(Span::styled(
+        format!(" {status_label}"),
+        Style::default().fg(TEXT_DIM),
+    ));
+    spans.push(sep.clone());
+    spans.push(Span::styled(
+        format!("{}↑ {}↓", app.tokens_in, app.tokens_out),
+        Style::default().fg(TEXT_DIM),
+    ));
+    if !scrolled.is_empty() {
+        spans.push(Span::styled(scrolled, Style::default().fg(ACCENT_DIM)));
+    }
+    if !panel_indicator.is_empty() {
+        spans.push(Span::styled(
+            panel_indicator,
+            Style::default().fg(ACCENT_DIM),
+        ));
+    }
+
     frame.render_widget(
-        Paragraph::new(text).style(Style::default().bg(Color::DarkGray).fg(Color::White)),
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(SURFACE)),
         header_rows[0],
     );
 
@@ -639,21 +664,12 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         0
     };
-    let gauge_label = format!(" context {}/{} ", total_tokens, app.context_max_tokens);
+    let fill = if ratio > 85 { ERROR } else { ACCENT };
+    let gauge_label = format!(" {total_tokens} / {} ctx ", app.context_max_tokens);
     let gauge = Gauge::default()
-        .gauge_style(
-            Style::default()
-                .fg(if ratio > 80 {
-                    Color::Red
-                } else if ratio > 50 {
-                    Color::Yellow
-                } else {
-                    Color::Green
-                })
-                .bg(Color::DarkGray),
-        )
+        .gauge_style(Style::default().fg(fill).bg(SURFACE_LIGHT))
         .percent(ratio)
-        .label(gauge_label);
+        .label(Span::styled(gauge_label, Style::default().fg(TEXT)));
     frame.render_widget(gauge, header_rows[1]);
 }
 
@@ -691,36 +707,43 @@ fn draw_command_palette(frame: &mut Frame, app: &App) {
             .collect()
     };
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
-        .split(area);
+    let block = modal_block("Command Palette");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-    let query_text = format!("> {}", app.palette_query);
-    let input_block = Paragraph::new(query_text)
-        .block(Block::bordered().title(" Command Palette "))
-        .style(Style::default().fg(Color::White));
-    frame.render_widget(input_block, chunks[0]);
+    let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(inner);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("› ", accent()),
+            Span::styled(app.palette_query.clone(), text()),
+        ])),
+        chunks[0],
+    );
 
     if !filtered.is_empty() {
-        let items: Vec<String> = filtered
+        let items: Vec<Line> = filtered
             .iter()
-            .map(|(cmd, desc)| format!(" {:<20} {}", cmd, desc))
+            .map(|(cmd, desc)| {
+                Line::from(vec![
+                    Span::styled(format!(" {cmd:<18}"), accent()),
+                    Span::styled(format!(" {desc}"), dim()),
+                ])
+            })
             .collect();
 
         let sel = app.palette_selection.min(filtered.len().saturating_sub(1));
         let mut state = ListState::default().with_selected(Some(sel));
-
-        let list =
-            List::new(items).highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan));
-
+        let list = List::new(items)
+            .highlight_style(selection())
+            .highlight_symbol("▶ ");
         frame.render_stateful_widget(list, chunks[1], &mut state);
     }
 
     if !app.streaming {
         frame.set_cursor_position((
-            chunks[0].x + app.palette_query.len() as u16 + 2,
-            chunks[0].y + 1,
+            chunks[0].x + 2 + app.palette_query.chars().count() as u16,
+            chunks[0].y,
         ));
     }
 }
@@ -730,28 +753,34 @@ fn draw_model_picker(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, area);
 
     let models = filtered_models(&app.available_models, &app.model_picker_query);
-    let items: Vec<String> = models
+    let items: Vec<Line> = models
         .iter()
-        .enumerate()
-        .map(|(i, m)| {
-            let marker: String = if m.as_str() == app.model.as_str() {
-                " ●".into()
+        .map(|m| {
+            let current = m.as_str() == app.model.as_str();
+            let (marker, mcolor) = if current {
+                (" ● ", ACCENT_LIGHT)
             } else {
-                format!(" {}.", i + 1)
+                (" ◇ ", ACCENT_DIM)
             };
-            format!("{} {}", marker, m)
+            let name_style = if current { accent_bold() } else { text() };
+            Line::from(vec![
+                Span::styled(marker, Style::default().fg(mcolor)),
+                Span::styled((*m).clone(), name_style),
+            ])
         })
         .collect();
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
-        .split(area);
+    let nb = app.available_models.len();
+    let block = modal_block(&format!("Switch Model · {nb}"));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-    let query_text = format!("> {}", app.model_picker_query);
-    let nb = format!("{} models", app.available_models.len());
+    let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(inner);
     frame.render_widget(
-        Paragraph::new(query_text).block(Block::bordered().title(format!(" Switch Model ({nb}) "))),
+        Paragraph::new(Line::from(vec![
+            Span::styled("› ", accent()),
+            Span::styled(app.model_picker_query.clone(), text()),
+        ])),
         chunks[0],
     );
 
@@ -761,7 +790,9 @@ fn draw_model_picker(frame: &mut Frame, app: &App) {
             .min(items.len().saturating_sub(1));
         let mut state = ListState::default().with_selected(Some(sel));
         frame.render_stateful_widget(
-            List::new(items).highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan)),
+            List::new(items)
+                .highlight_style(selection())
+                .highlight_symbol("▶ "),
             chunks[1],
             &mut state,
         );
@@ -769,8 +800,8 @@ fn draw_model_picker(frame: &mut Frame, app: &App) {
 
     if !app.streaming {
         frame.set_cursor_position((
-            chunks[0].x + app.model_picker_query.len() as u16 + 2,
-            chunks[0].y + 1,
+            chunks[0].x + 2 + app.model_picker_query.chars().count() as u16,
+            chunks[0].y,
         ));
     }
 }
@@ -790,35 +821,43 @@ fn draw_session_picker(frame: &mut Frame, app: &App) {
     let area = centered_rect(70, 60, frame.area());
     frame.render_widget(Clear, area);
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
-        .split(area);
-
     let count = app.sessions.len();
+    let block = modal_block(&format!("Sessions · {count}"));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(inner);
     frame.render_widget(
-        Paragraph::new(" Use ↑↓ to navigate, Enter to select, Esc to close ")
-            .block(Block::bordered().title(format!(" Sessions ({count}) "))),
+        Paragraph::new(Span::styled(
+            " ↑↓ navigate · Enter select · Esc close",
+            dim(),
+        )),
         chunks[0],
     );
 
     if app.sessions.is_empty() {
-        let msg = Paragraph::new(" No saved sessions.\n\n Start a chat to auto-save.")
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(msg, chunks[1]);
+        frame.render_widget(
+            Paragraph::new("\n No saved sessions — start a chat to auto-save.").style(dim()),
+            chunks[1],
+        );
     } else {
-        let items: Vec<String> = app
+        let items: Vec<Line> = app
             .sessions
             .iter()
             .map(|s| {
-                format!(
-                    " {} | {}msgs | {}tk | {} | {}",
-                    s.model,
-                    s.message_count,
-                    s.total_tokens,
-                    &s.updated_at[..s.updated_at.len().min(16)],
-                    &s.id[..s.id.len().min(8)],
-                )
+                Line::from(vec![
+                    Span::styled(format!(" {}", s.model), accent()),
+                    Span::styled(
+                        format!(
+                            "  {}msg · {}tk · {} · {}",
+                            s.message_count,
+                            s.total_tokens,
+                            &s.updated_at[..s.updated_at.len().min(16)],
+                            &s.id[..s.id.len().min(8)],
+                        ),
+                        dim(),
+                    ),
+                ])
             })
             .collect();
 
@@ -827,7 +866,9 @@ fn draw_session_picker(frame: &mut Frame, app: &App) {
             .min(items.len().saturating_sub(1));
         let mut state = ListState::default().with_selected(Some(sel));
         frame.render_stateful_widget(
-            List::new(items).highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan)),
+            List::new(items)
+                .highlight_style(selection())
+                .highlight_symbol("▶ "),
             chunks[1],
             &mut state,
         );
@@ -839,35 +880,40 @@ fn draw_approval_modal(frame: &mut Frame, app: &App) {
         Some(p) => p,
         None => return,
     };
-    let area = centered_rect(60, 30, frame.area());
+    let area = centered_rect(60, 34, frame.area());
     frame.render_widget(Clear, area);
 
-    let detail_disp: String = detail.chars().take(200).collect();
-    let lines = vec![
-        Line::from(vec![Span::styled(
-            format!(" Tool: {tool}"),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            format!("  {detail_disp}"),
-            Style::default().fg(Color::White),
-        )]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "  [y] approve    [n] deny    [a] approve all this session",
-            Style::default().fg(Color::Gray),
-        )]),
-    ];
+    let detail_disp: String = detail.chars().take(240).collect();
+    let block = modal_block("Approval required");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::bordered().title(" Approval required "))
-            .style(Style::default().fg(Color::White)),
-        area,
-    );
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  tool   ", dim()),
+            Span::styled(tool.clone(), accent_bold()),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(format!("  {detail_disp}"), text())]),
+        Line::from(""),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                "  [y]",
+                Style::default().fg(SUCCESS).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" approve    ", text()),
+            Span::styled(
+                "[n]",
+                Style::default().fg(ERROR).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" deny    ", text()),
+            Span::styled("[a]", accent_bold()),
+            Span::styled(" approve all session", text()),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
@@ -895,12 +941,13 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     let tabs = Tabs::new(tab_titles)
         .block(
             Block::default()
-                .borders(Borders::LEFT | Borders::BOTTOM)
-                .border_style(Style::default().fg(Color::DarkGray)),
+                .borders(Borders::LEFT)
+                .border_style(Style::default().fg(ACCENT_DIM)),
         )
         .select(app.sidebar_tab)
-        .highlight_style(Style::default().fg(Color::Cyan))
-        .divider("|");
+        .style(Style::default().fg(TEXT_DIM))
+        .highlight_style(accent_bold())
+        .divider(Span::styled("·", Style::default().fg(ACCENT_DIM)));
 
     let tab_rows = Layout::default()
         .direction(Direction::Vertical)
@@ -925,7 +972,7 @@ fn draw_repo_tab(frame: &mut Frame, area: Rect, app: &App) {
     if app.repo_files.is_empty() {
         lines.push(Line::from(vec![Span::styled(
             " (no data yet)",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(TEXT_DIM),
         )]));
     } else {
         let mut sorted: Vec<(String, f64)> = app.repo_files.clone();
@@ -938,14 +985,7 @@ fn draw_repo_tab(frame: &mut Frame, area: Rect, app: &App) {
     let scroll = app.repo_scroll.min(total.saturating_sub(max_lines.max(1)));
     let visible: Vec<Line> = lines.into_iter().skip(scroll).take(max_lines).collect();
 
-    frame.render_widget(
-        Paragraph::new(visible).block(
-            Block::default()
-                .borders(Borders::LEFT)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        ),
-        area,
-    );
+    frame.render_widget(Paragraph::new(visible).block(panel_block()), area);
 
     if total > max_lines {
         let state = ScrollbarState::default()
@@ -961,7 +1001,7 @@ fn draw_repo_tab(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_stateful_widget(
             Scrollbar::default()
                 .orientation(ScrollbarOrientation::VerticalRight)
-                .style(Style::default().fg(Color::DarkGray)),
+                .style(Style::default().fg(ACCENT_DIM)),
             sb_area,
             &mut state.clone(),
         );
@@ -1022,11 +1062,11 @@ fn render_tree(lines: &mut Vec<Line>, nodes: &[FileTreeNode], prefix: &str) {
 
         if let Some(score) = node.score {
             let color = if score > 0.5 {
-                Color::White
+                ACCENT_LIGHT
             } else if score > 0.1 {
-                Color::Gray
+                ACCENT
             } else {
-                Color::DarkGray
+                TEXT_DIM
             };
             let name = node.name.clone();
             let display_name = if name.chars().count() > 24 {
@@ -1038,7 +1078,7 @@ fn render_tree(lines: &mut Vec<Line>, nodes: &[FileTreeNode], prefix: &str) {
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("{prefix}{connector}"),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(ACCENT_DIM),
                 ),
                 Span::styled(format!("{:.3}  ", score), Style::default().fg(color)),
                 Span::styled(display_name, Style::default().fg(color)),
@@ -1046,7 +1086,7 @@ fn render_tree(lines: &mut Vec<Line>, nodes: &[FileTreeNode], prefix: &str) {
         } else {
             lines.push(Line::from(vec![Span::styled(
                 format!("{prefix}{connector}{}", node.name),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(ACCENT_DIM),
             )]));
         }
 
@@ -1066,74 +1106,61 @@ fn draw_session_tab(frame: &mut Frame, area: Rect, app: &App) {
     };
 
     let lines = vec![
-        Line::from(vec![Span::styled(
-            " Session",
-            Style::default().fg(Color::Cyan),
-        )]),
+        Line::from(vec![Span::styled(" ▌ Session", accent_bold())]),
         Line::from(""),
         Line::from(vec![Span::styled(
             format!(" Model: {}", app.model),
-            Style::default().fg(Color::White),
+            Style::default().fg(TEXT),
         )]),
         Line::from(""),
         Line::from(vec![Span::styled(
             format!(" Tokens in:  {}", app.tokens_in),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(TEXT_DIM),
         )]),
         Line::from(vec![Span::styled(
             format!(" Tokens out: {}", app.tokens_out),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(TEXT_DIM),
         )]),
         Line::from(vec![Span::styled(
             format!(" Total:      {} ({:.0}%)", total, context_pct),
-            Style::default().fg(Color::White),
+            Style::default().fg(TEXT),
         )]),
         Line::from(""),
         Line::from(vec![Span::styled(
             format!(" Est. cost:  ${:.4}", app.cost_usd),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(WARN),
         )]),
         Line::from(""),
         Line::from(vec![Span::styled(
             format!(" Msgs: {}", app.messages.len()),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(TEXT_DIM),
         )]),
     ];
 
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .borders(Borders::LEFT)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        ),
-        area,
-    );
+    frame.render_widget(Paragraph::new(lines).block(panel_block()), area);
 }
 
 fn draw_mcp_tab(frame: &mut Frame, area: Rect, app: &App) {
     let mut lines = vec![
-        Line::from(vec![Span::styled(
-            " MCP Servers",
-            Style::default().fg(Color::Cyan),
-        )]),
+        Line::from(vec![Span::styled(" ▌ MCP Servers", accent_bold())]),
         Line::from(""),
     ];
 
     if app.mcp_servers.is_empty() {
         lines.push(Line::from(vec![Span::styled(
             " No MCP servers configured",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(TEXT_DIM),
         )]));
     } else {
         for (name, connected) in &app.mcp_servers {
             let (icon, color) = if *connected {
-                (" ●", Color::Green)
+                (" ●", SUCCESS)
             } else {
-                (" ○", Color::Red)
+                (" ○", ERROR)
             };
             lines.push(Line::from(vec![
                 Span::styled(icon, Style::default().fg(color)),
-                Span::styled(format!(" {name}"), Style::default().fg(Color::White)),
+                Span::styled(format!(" {name}"), Style::default().fg(TEXT)),
             ]));
         }
     }
@@ -1141,17 +1168,10 @@ fn draw_mcp_tab(frame: &mut Frame, area: Rect, app: &App) {
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
         " Configure in config.toml",
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(TEXT_DIM),
     )]));
 
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .borders(Borders::LEFT)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        ),
-        area,
-    );
+    frame.render_widget(Paragraph::new(lines).block(panel_block()), area);
 }
 
 fn draw_todos_tab(frame: &mut Frame, area: Rect, app: &App) {
@@ -1161,8 +1181,8 @@ fn draw_todos_tab(frame: &mut Frame, area: Rect, app: &App) {
 
     let mut lines = vec![
         Line::from(vec![Span::styled(
-            format!(" Progress: {}/{} ({}%)", done_count, total, pct),
-            Style::default().fg(Color::Cyan),
+            format!(" ▌ Progress  {}/{}  ({}%)", done_count, total, pct),
+            accent_bold(),
         )]),
         Line::from(""),
     ];
@@ -1170,23 +1190,23 @@ fn draw_todos_tab(frame: &mut Frame, area: Rect, app: &App) {
     if app.todos.is_empty() {
         lines.push(Line::from(vec![Span::styled(
             " No todos found in conversation.",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(TEXT_DIM),
         )]));
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
             " Use checkboxes in prompts:",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(TEXT_DIM),
         )]));
         lines.push(Line::from(vec![Span::styled(
             " - [ ] Task name",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(ACCENT_DIM),
         )]));
     } else {
         for item in &app.todos {
             let (icon, color) = if item.done {
-                (" [x] ", Color::Green)
+                (" ✔ ", SUCCESS)
             } else {
-                (" [ ] ", Color::Gray)
+                (" ○ ", TEXT_DIM)
             };
             lines.push(Line::from(vec![
                 Span::styled(icon, Style::default().fg(color)),
@@ -1195,14 +1215,7 @@ fn draw_todos_tab(frame: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .borders(Borders::LEFT)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        ),
-        area,
-    );
+    frame.render_widget(Paragraph::new(lines).block(panel_block()), area);
 }
 
 fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
@@ -1251,7 +1264,7 @@ fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_stateful_widget(
         Scrollbar::default()
             .orientation(ScrollbarOrientation::VerticalRight)
-            .style(Style::default().fg(Color::DarkGray)),
+            .style(Style::default().fg(ACCENT_DIM)),
         scrollbar_area,
         &mut s,
     );
@@ -1259,22 +1272,24 @@ fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
 
 fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let content_width = width.saturating_sub(2);
+
     for msg in messages {
+        let (glyph, glyph_color) = match msg.role {
+            MessageRole::User => ("▌ ", ACCENT_LIGHT),
+            MessageRole::Assistant => ("▎ ", ACCENT_DIM),
+            MessageRole::System => ("▏ ", TEXT_DIM),
+        };
+
+        let mut body: Vec<Line<'static>> = Vec::new();
+
         match msg.role {
             MessageRole::User => {
-                let wrapped = wrap_text(&msg.text, width.saturating_sub(2));
-                for (i, w) in wrapped.iter().enumerate() {
-                    if i == 0 {
-                        lines.push(Line::from(vec![
-                            Span::styled("> ", Style::default().fg(Color::Cyan)),
-                            Span::styled(w.clone(), Style::default().fg(Color::White)),
-                        ]));
-                    } else {
-                        lines.push(Line::from(vec![Span::styled(
-                            format!("  {w}"),
-                            Style::default().fg(Color::White),
-                        )]));
-                    }
+                for w in wrap_text(&msg.text, content_width) {
+                    body.push(Line::from(Span::styled(
+                        w,
+                        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                    )));
                 }
             }
             MessageRole::Assistant => {
@@ -1287,23 +1302,23 @@ fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> Vec<Line<'
                         if in_code_block {
                             if !code_buffer.is_empty() {
                                 for hl in highlight_code(&code_buffer, &code_lang) {
-                                    lines.push(hl);
+                                    body.push(hl);
                                 }
                             }
                             code_buffer.clear();
                             in_code_block = false;
-                            lines.push(Line::from(vec![Span::styled(
+                            body.push(Line::from(Span::styled(
                                 text_line.to_string(),
-                                Style::default().fg(Color::DarkGray),
-                            )]));
+                                Style::default().fg(ACCENT_DIM),
+                            )));
                         } else {
                             in_code_block = true;
                             code_lang =
                                 trimmed.strip_prefix("```").unwrap_or("").trim().to_string();
-                            lines.push(Line::from(vec![Span::styled(
+                            body.push(Line::from(Span::styled(
                                 text_line.to_string(),
-                                Style::default().fg(Color::DarkGray),
-                            )]));
+                                Style::default().fg(ACCENT_DIM),
+                            )));
                         }
                         continue;
                     }
@@ -1321,13 +1336,13 @@ fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> Vec<Line<'
                         || trimmed_para == "___"
                         || numbered_prefix(trimmed_para).is_some();
                     if is_block {
-                        lines.push(Line::from(render_markdown_line(text_line)));
+                        body.push(Line::from(render_markdown_line(text_line)));
                     } else {
-                        for w in wrap_text(text_line, width) {
+                        for w in wrap_text(text_line, content_width) {
                             if w.is_empty() {
-                                lines.push(Line::from(""));
+                                body.push(Line::from(""));
                             } else {
-                                lines.push(Line::from(render_inline_markdown(&w)));
+                                body.push(Line::from(render_inline_markdown(&w)));
                             }
                         }
                     }
@@ -1335,19 +1350,19 @@ fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> Vec<Line<'
             }
             MessageRole::System => {
                 let is_error = msg.text.contains("Error") || msg.text.contains("error");
-                let color = if is_error {
-                    Color::Red
-                } else {
-                    Color::DarkGray
-                };
-                for w in wrap_text(&format!("  {}", msg.text), width) {
-                    lines.push(Line::from(vec![Span::styled(
-                        w,
-                        Style::default().fg(color),
-                    )]));
+                let color = if is_error { ERROR } else { TEXT_DIM };
+                for w in wrap_text(&msg.text, content_width) {
+                    body.push(Line::from(Span::styled(w, Style::default().fg(color))));
                 }
             }
         }
+
+        for mut line in body {
+            let mut spans = vec![Span::styled(glyph, Style::default().fg(glyph_color))];
+            spans.append(&mut line.spans);
+            lines.push(Line::from(spans));
+        }
+        lines.push(Line::from(""));
     }
     lines
 }
@@ -1357,48 +1372,49 @@ fn render_markdown_line(line: &str) -> Vec<Span<'static>> {
     if trimmed.is_empty() {
         return vec![Span::raw("")];
     }
-    if trimmed.starts_with("### ") {
+    if let Some(rest) = trimmed.strip_prefix("### ") {
         return vec![Span::styled(
-            trimmed.strip_prefix("### ").unwrap_or(trimmed).to_string(),
+            rest.to_string(),
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        )];
+    }
+    if let Some(rest) = trimmed.strip_prefix("## ") {
+        return vec![Span::styled(
+            rest.to_string(),
             Style::default()
-                .fg(Color::Cyan)
+                .fg(ACCENT_LIGHT)
                 .add_modifier(Modifier::BOLD),
         )];
     }
-    if trimmed.starts_with("## ") {
+    if let Some(rest) = trimmed.strip_prefix("# ") {
         return vec![Span::styled(
-            trimmed.strip_prefix("## ").unwrap_or(trimmed).to_string(),
-            Style::default().fg(Color::Cyan),
-        )];
-    }
-    if trimmed.starts_with("# ") {
-        return vec![Span::styled(
-            trimmed.strip_prefix("# ").unwrap_or(trimmed).to_string(),
+            rest.to_string(),
             Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
+                .fg(ACCENT_LIGHT)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
         )];
     }
-    if trimmed.starts_with("> ") {
-        let content = trimmed.strip_prefix("> ").unwrap_or(trimmed);
+    if let Some(content) = trimmed.strip_prefix("> ") {
         return vec![Span::styled(
             format!("│ {content}"),
-            Style::default().fg(Color::DarkGray),
+            Style::default()
+                .fg(ACCENT_DIM)
+                .add_modifier(Modifier::ITALIC),
         )];
     }
     if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
-        let content = &trimmed[2..];
-        return vec![Span::styled(
-            format!("  • {content}"),
-            Style::default().fg(Color::Gray),
-        )];
+        let content = trimmed[2..].to_string();
+        return vec![
+            Span::styled("  • ", Style::default().fg(ACCENT)),
+            Span::styled(content, Style::default().fg(TEXT)),
+        ];
     }
     if let Some(cap) = numbered_prefix(trimmed) {
-        return vec![Span::styled(cap, Style::default().fg(Color::Gray))];
+        return vec![Span::styled(cap, Style::default().fg(TEXT))];
     }
     if trimmed == "---" || trimmed == "***" || trimmed == "___" {
         let bar = "─".repeat(40);
-        return vec![Span::styled(bar, Style::default().fg(Color::DarkGray))];
+        return vec![Span::styled(bar, Style::default().fg(ACCENT_DIM))];
     }
     render_inline_markdown(line)
 }
@@ -1419,7 +1435,7 @@ fn numbered_prefix(s: &str) -> Option<String> {
 fn render_inline_markdown(line: &str) -> Vec<Span<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut remaining = line;
-    let base = Style::default().fg(Color::Gray);
+    let base = Style::default().fg(TEXT);
 
     while !remaining.is_empty() {
         if let Some(start) = remaining.find("**") {
@@ -1445,7 +1461,7 @@ fn render_inline_markdown(line: &str) -> Vec<Span<'static>> {
             if let Some(end) = remaining.find('`') {
                 spans.push(Span::styled(
                     remaining[..end].to_string(),
-                    Style::default().fg(Color::Yellow).bg(Color::DarkGray),
+                    Style::default().fg(ACCENT_LIGHT).bg(SURFACE_LIGHT),
                 ));
                 remaining = &remaining[end + 1..];
             } else {
@@ -1502,21 +1518,23 @@ fn wrap_line(line: &str, width: usize, result: &mut Vec<String>) {
 }
 
 fn draw_input(frame: &mut Frame, area: Rect, app: &App) {
-    let mut input = app.input.clone();
-    input.set_style(if app.streaming {
-        Style::default().fg(Color::DarkGray)
+    let (text_color, border_color) = if app.streaming {
+        (ACCENT_DIM, ACCENT_DIM)
     } else {
-        Style::default().fg(Color::White)
-    });
+        (TEXT, ACCENT)
+    };
+    let mut input = app.input.clone();
+    input.set_style(Style::default().fg(text_color));
     input.set_block(
         Block::default()
             .borders(Borders::TOP)
-            .border_style(Style::default().fg(Color::DarkGray)),
+            .border_style(Style::default().fg(border_color))
+            .title(Line::from(" ◆ message ").style(accent_bold())),
     );
     frame.render_widget(&input, area);
 
     if !app.streaming {
-        frame.set_cursor_position((area.x + app.input.cursor().1 as u16 + 1, area.y));
+        frame.set_cursor_position((area.x + app.input.cursor().1 as u16, area.y + 1));
     }
 }
 
@@ -1599,7 +1617,7 @@ fn highlight_code(lines: &[String], language: &str) -> Vec<Line<'static>> {
                     ));
                 }
             }
-            Err(_) => spans.push(Span::styled(line.clone(), Style::default().fg(Color::Gray))),
+            Err(_) => spans.push(Span::styled(line.clone(), Style::default().fg(TEXT_DIM))),
         }
         result.push(Line::from(spans));
     }
