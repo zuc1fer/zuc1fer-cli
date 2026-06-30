@@ -46,7 +46,7 @@ impl Tool for WebSearch {
 
         let search_url = format!(
             "https://html.duckduckgo.com/html/?q={}",
-            urlencoding(&query)
+            urlencoding(query)
         );
 
         let response = client.get(&search_url).send().await;
@@ -169,7 +169,7 @@ fn extract_tag_content_with_class(line: &str, tag: &str, class: &str) -> Option<
         if let Some(content_start) = after_open.find('>') {
             let content = &after_open[content_start + 1..];
             if let Some(end) = content.find(&format!("</{}>", tag)) {
-                return Some(html_entity_decode(&content[..end].trim().to_string()));
+                return Some(html_entity_decode(content[..end].trim()));
             }
         }
     }

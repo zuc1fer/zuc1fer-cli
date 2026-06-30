@@ -66,29 +66,46 @@ impl ToolRegistry {
         calls: &[ToolCall],
         ctx: &ToolContext,
     ) -> Vec<ToolResult> {
-        let futures: Vec<_> = calls
+        const SERIAL: &[&str] = &["write", "edit", "bash"];
+
+        let mut results: Vec<Option<ToolResult>> = vec![None; calls.len()];
+
+        let concurrent: Vec<(usize, _)> = calls
             .iter()
-            .map(|call| {
+            .enumerate()
+            .filter(|(_, call)| !SERIAL.contains(&call.name.as_str()))
+            .map(|(i, call)| {
                 let tool = self.get(&call.name);
                 let call = call.clone();
                 let ctx = ctx.clone();
-                async move {
-                    if let Some(tool) = tool {
-                        match tool.execute(&call, &ctx).await {
-                            Ok(r) => r,
-                            Err(e) => ToolResult::error(&call.id, e.to_string()),
-                        }
-                    } else {
-                        ToolResult::error(
-                            &call.id,
-                            format!("Unknown tool: {}", call.name),
-                        )
-                    }
-                }
+                (i, async move { Self::run_one(tool, call, ctx).await })
             })
             .collect();
 
-        futures::future::join_all(futures).await
+        let (indices, futures): (Vec<usize>, Vec<_>) = concurrent.into_iter().unzip();
+        let done = futures::future::join_all(futures).await;
+        for (i, result) in indices.into_iter().zip(done) {
+            results[i] = Some(result);
+        }
+
+        for (i, call) in calls.iter().enumerate() {
+            if SERIAL.contains(&call.name.as_str()) {
+                let tool = self.get(&call.name);
+                results[i] = Some(Self::run_one(tool, call.clone(), ctx.clone()).await);
+            }
+        }
+
+        results.into_iter().map(|r| r.unwrap()).collect()
+    }
+
+    async fn run_one(tool: Option<Arc<dyn Tool>>, call: ToolCall, ctx: ToolContext) -> ToolResult {
+        match tool {
+            Some(tool) => match tool.execute(&call, &ctx).await {
+                Ok(r) => r,
+                Err(e) => ToolResult::error(&call.id, e.to_string()),
+            },
+            None => ToolResult::error(&call.id, format!("Unknown tool: {}", call.name)),
+        }
     }
 
     fn tool_names(&self) -> String {

@@ -60,6 +60,8 @@ impl Tool for WriteTool {
             }
         }
 
+        let has_content_key = call.arguments.get("content").map(|v| v.is_string()).unwrap_or(false)
+            || call.arguments.get("content_b64").map(|v| v.is_string()).unwrap_or(false);
         let mut content = call.arguments["content"].as_str().unwrap_or("").to_string();
         if let Some(b64) = call.arguments["content_b64"].as_str() {
             if !b64.is_empty() {
@@ -70,7 +72,7 @@ impl Tool for WriteTool {
                 }
             }
         }
-        if content.is_empty() {
+        if content.is_empty() && !has_content_key {
             return Ok(ToolResult::error(&call.id, "No content or content_b64 provided"));
         }
 
@@ -86,20 +88,23 @@ impl Tool for WriteTool {
         let verify = std::fs::read_to_string(&path).unwrap_or_default();
         if verify != content {
             let diff = diff_strings(&content, &verify);
+            let win_start = diff.0.saturating_sub(20);
+            let expected_ctx: String = content.chars().skip(win_start).take(40).collect();
+            let got_ctx: String = verify.chars().skip(win_start).take(40).collect();
             return Ok(ToolResult::error(
                 &call.id,
                 format!(
                     "Write verification FAILED. Content on disk differs from what was sent.\n\
-                     Sent {} chars, got {} chars on disk.\n\
+                     Sent {} bytes, got {} bytes on disk.\n\
                      First difference at char {}:\n\
                      Expected: ...{}...\n\
                      Got:      ...{}...\n\
-                     This may indicate path corruption or encoding issues.",
+                     This may indicate an encoding issue.",
                     content.len(),
                     verify.len(),
                     diff.0,
-                    &content[diff.0.saturating_sub(20)..(diff.0 + 20).min(content.len())],
-                    &verify[diff.0.saturating_sub(20)..(diff.0 + 20).min(verify.len())],
+                    expected_ctx,
+                    got_ctx,
                 ),
             ));
         }
