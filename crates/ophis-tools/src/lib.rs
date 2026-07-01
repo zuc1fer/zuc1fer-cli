@@ -1,6 +1,7 @@
 pub mod ast_grep;
 pub mod bash;
 pub mod edit;
+pub mod error_parse;
 pub mod git;
 pub mod glob;
 pub mod grep;
@@ -59,6 +60,13 @@ impl ToolResult {
     pub fn with_diff(mut self, diff: String) -> Self {
         let mut m = self.metadata.unwrap_or_default();
         m.insert("diff".into(), diff);
+        self.metadata = Some(m);
+        self
+    }
+
+    pub fn with_metadata(mut self, key: &str, value: String) -> Self {
+        let mut m = self.metadata.unwrap_or_default();
+        m.insert(key.to_string(), value);
         self.metadata = Some(m);
         self
     }
