@@ -52,23 +52,58 @@ fn is_bg(c: Rgb) -> bool {
     (c.r as u16 + c.g as u16 + c.b as u16) / 3 > BG_THRESHOLD
 }
 
-pub fn splash_display(term_width: u16, term_height: u16) -> Vec<Line<'static>> {
-    let (src_w, src_h, pixels) = get_source();
+/// Left-column data: (display text, optional style).
+/// When style is `None` the line is blank.
+const LEFT_ROWS: &[(&str, bool)] = &[
+    ("█████ █████ ██ ██ █████ █████", true),
+    ("██ ██ ██ ██ ██ ██  ██  ██   ", true),
+    ("██ ██ █████ █████  ██  █████", true),
+    ("██ ██ ██    ██ ██  ██     ██", true),
+    ("█████ ██    ██ ██ █████ █████", true),
+    ("", false),
+    ("a recursive coding agent", true),
+    ("", false),
+    ("created by zuc1fer", true),
+    ("zuc1fer.business@gmail.com", true),
+    ("https://t.me/zuc1fer", true),
+    ("https://github.com/zuc1fer", true),
+    ("", false),
+    (
+        "type a message to begin  \u{00B7}  /help  \u{00B7}  /models",
+        true,
+    ),
+];
 
-    let max_w = (term_width as u32).saturating_sub(4).max(20);
-    let max_h = (term_height as u32).saturating_sub(5).max(2);
+const LEFT_WIDTH: u16 = 38;
 
-    let src_ratio = src_w as f64 / src_h as f64;
-    let char_adj = 0.50;
-
-    let w_from_h = (max_h as f64 / char_adj * src_ratio) as u32;
-    let (out_w, out_h) = if w_from_h >= 40 {
-        (w_from_h.min(max_w).max(20), max_h)
+fn left_line_style(is_art: bool) -> Style {
+    if is_art {
+        Style::default().fg(theme::ACCENT_LIGHT)
     } else {
-        let h_from_w = (max_w as f64 * char_adj / src_ratio).max(1.0) as u32;
-        (max_w, h_from_w.min(max_h).max(2))
-    };
+        Style::default().fg(theme::TEXT_DIM)
+    }
+}
 
+fn build_left_column() -> Vec<(String, Style)> {
+    let mut col: Vec<(String, Style)> = Vec::with_capacity(LEFT_ROWS.len());
+
+    let mut art_idx = 0;
+    for (text, styled) in LEFT_ROWS {
+        let style = if *styled {
+            let is_art = art_idx < 5;
+            art_idx += 1;
+            left_line_style(is_art)
+        } else {
+            Style::default()
+        };
+        col.push((text.to_string(), style));
+    }
+
+    col
+}
+
+fn render_ouroboros(out_w: u32, out_h: u32) -> Vec<Line<'static>> {
+    let (src_w, src_h, pixels) = get_source();
     let out_scanlines = out_h * 2;
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(out_h as usize);
 
@@ -113,18 +148,76 @@ pub fn splash_display(term_width: u16, term_height: u16) -> Vec<Line<'static>> {
         lines.push(Line::from(spans));
     }
 
-    let blank = Line::from("");
-
-    lines.push(blank.clone());
-    lines.push(Line::from(Span::styled(
-        "\u{27B3}  a recursive coding agent  \u{27B3}",
-        Style::default().fg(theme::ACCENT),
-    )));
-    lines.push(blank.clone());
-    lines.push(Line::from(Span::styled(
-        "type a message to begin   \u{00B7}   /help   \u{00B7}   /models",
-        Style::default().fg(theme::TEXT_DIM),
-    )));
-
     lines
+}
+
+pub fn splash_display(term_width: u16, term_height: u16) -> Vec<Line<'static>> {
+    let left = build_left_column();
+    let left_row_count = left.len();
+
+    let img_w: u32 = if term_width >= 52 {
+        ((term_width as u32).saturating_sub(LEFT_WIDTH as u32 + 4))
+            .min(28)
+            .max(14)
+    } else {
+        0
+    };
+
+    if img_w < 14 {
+        let mut out: Vec<Line<'static>> = Vec::with_capacity(left_row_count);
+        for (text, style) in &left {
+            if style.fg.is_some() {
+                out.push(Line::from(Span::styled(text.clone(), *style)));
+            } else {
+                out.push(Line::from(""));
+            }
+        }
+        return out;
+    }
+
+    let src_ratio = {
+        let (w, h, _) = get_source();
+        w as f64 / h as f64
+    };
+    let char_adj = 0.50;
+    let max_h = (term_height as u32).saturating_sub(5).max(2);
+
+    let out_w = img_w;
+    let out_h = ((out_w as f64 * char_adj / src_ratio).max(2.0) as u32).min(max_h);
+
+    let right = render_ouroboros(out_w, out_h);
+    let right_row_count = right.len();
+
+    let total_rows = left_row_count.max(right_row_count);
+    let right_offset = left_row_count.saturating_sub(right_row_count) / 2;
+
+    let mut result: Vec<Line<'static>> = Vec::with_capacity(total_rows);
+    let gap = Span::raw("  ");
+
+    for i in 0..total_rows {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+
+        if i < left_row_count {
+            let (text, style) = &left[i];
+            if style.fg.is_some() {
+                let padded = format!("{text:width$}", width = LEFT_WIDTH as usize);
+                spans.push(Span::styled(padded, *style));
+            } else {
+                spans.push(Span::raw(" ".repeat(LEFT_WIDTH as usize)));
+            }
+        } else {
+            spans.push(Span::raw(" ".repeat(LEFT_WIDTH as usize)));
+        }
+
+        spans.push(gap.clone());
+
+        if i >= right_offset && (i - right_offset) < right_row_count {
+            let img_idx = i - right_offset;
+            spans.extend(right[img_idx].spans.clone());
+        }
+
+        result.push(Line::from(spans));
+    }
+
+    result
 }
