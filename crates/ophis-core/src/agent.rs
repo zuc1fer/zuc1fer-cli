@@ -838,6 +838,54 @@ impl Agent {
                 }
             }
 
+            // Concurrent traces: try alternative approaches on compilation failure
+            for (call, result) in tool_calls.iter().zip(results.iter_mut()) {
+                if call.name == "bash" && result.is_error {
+                    let errors_json = result
+                        .metadata
+                        .as_ref()
+                        .and_then(|m| m.get("errors"))
+                        .cloned()
+                        .unwrap_or_default();
+                    if !errors_json.is_empty() {
+                        if let Ok(parsed) =
+                            serde_json::from_str::<Vec<ophis_tools::error_parse::ParsedError>>(
+                                &errors_json,
+                            )
+                        {
+                            let cmd = call.arguments["command"].as_str().unwrap_or("");
+                            let alts = ophis_tools::concurrent_trace::generate_alternatives(cmd, &parsed);
+                            if !alts.is_empty() {
+                                let alt_calls: Vec<ophis_tools::ToolCall> = alts
+                                    .iter()
+                                    .map(|a| ophis_tools::ToolCall {
+                                        id: format!("alt_{}", a.label.replace(' ', "_")),
+                                        name: "bash".into(),
+                                        arguments: serde_json::json!({"command": a.command}),
+                                    })
+                                    .collect();
+                                let alt_ctx = ctx.clone();
+                                let alt_results = self
+                                    .tool_registry
+                                    .execute_parallel(&alt_calls, &alt_ctx)
+                                    .await;
+                                for (alt, alt_result) in alts.iter().zip(alt_results.iter()) {
+                                    if !alt_result.is_error {
+                                        result
+                                            .content
+                                            .push_str(&format!(
+                                                "\n\n[Concurrent trace: {} succeeded]\n{}",
+                                                alt.label, alt_result.content
+                                            ));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Auto-diagnostics: run LSP on written/edited files
             if let Some(ref lsp) = self.lsp_client {
                 let mut enriched: std::collections::HashMap<String, String> = std::collections::HashMap::new();

@@ -1,5 +1,6 @@
 pub mod ast_grep;
 pub mod bash;
+pub mod concurrent_trace;
 pub mod edit;
 pub mod error_parse;
 pub mod git;
