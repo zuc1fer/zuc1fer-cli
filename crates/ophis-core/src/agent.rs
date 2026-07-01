@@ -32,7 +32,9 @@ const SYSTEM_PROMPT: &str = r#"You are ophis, a fast and capable CLI coding agen
 
 <TOOL_USAGE>
 - EXPLORE FIRST: Before making any changes, use glob/grep/read to understand the codebase. Issue all read/glob/grep calls in ONE response — they execute in parallel and save a round-trip.
+- BATCH EXPLORATION: When checking environment or project setup, issue all bash commands (which tool, what version, project structure) in ONE turn instead of one at a time.
 - BATCH WRITES: When creating or editing multiple files, do them all in ONE turn. Multiple write/edit calls execute together.
+- BATCH TESTS: When testing, combine multiple test cases into a single bash command rather than one scenario per turn.
 - PREFER EDIT over write for small changes to existing files — it is precise, preserves surrounding context, and avoids rewriting the entire file.
 - PREFER WRITE for new files or complete rewrites of existing files.
 - PREFER structured tools (read, edit, write, grep, glob) over bash when either would work. Use bash for compilation, testing, running commands, and git operations.
