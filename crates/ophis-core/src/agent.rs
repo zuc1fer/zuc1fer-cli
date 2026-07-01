@@ -77,7 +77,7 @@ pub enum AgentEvent {
     Error(String),
     Tokens { input: u64, output: u64, turn: u32 },
     ToolCallInfo { id: String, name: String, input: serde_json::Value, turn: u32 },
-    ToolResultInfo { id: String, content: String, is_error: bool, turn: u32 },
+    ToolResultInfo { id: String, content: String, is_error: bool, turn: u32, diff: Option<String> },
     TurnEnd { turn: u32, tokens: ophis_llm::Usage },
     Done,
     Repo(Vec<(String, f64)>),
@@ -814,11 +814,13 @@ impl Agent {
                     }
                 }
                 if let Some(ref tui) = self.tui {
+                    let diff = result.metadata.as_ref().and_then(|m| m.get("diff").cloned());
                     let _ = tui.tx.send(AgentEvent::ToolResultInfo {
                         id: result.tool_call_id.clone(),
                         content: result.content.clone(),
                         is_error: result.is_error,
                         turn: turn_count,
+                        diff,
                     });
                 }
             }

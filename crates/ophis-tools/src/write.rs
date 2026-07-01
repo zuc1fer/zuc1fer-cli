@@ -1,4 +1,5 @@
 use crate::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
+use similar::TextDiff;
 use std::path::PathBuf;
 
 pub struct WriteTool;
@@ -105,6 +106,19 @@ impl Tool for WriteTool {
         }
 
         let existed = path.exists();
+        let diff = if existed {
+            std::fs::read_to_string(&path).ok().map(|old| {
+                let mut buf = Vec::new();
+                TextDiff::from_lines(&old, &content)
+                    .unified_diff()
+                    .header("old", "new")
+                    .to_writer(&mut buf)
+                    .ok();
+                String::from_utf8_lossy(&buf).to_string()
+            })
+        } else {
+            None
+        };
         std::fs::write(&path, &content)?;
 
         let verify = std::fs::read_to_string(&path).unwrap_or_default();
@@ -132,10 +146,14 @@ impl Tool for WriteTool {
         }
 
         if existed {
-            Ok(ToolResult::success(
+            let mut r = ToolResult::success(
                 &call.id,
                 format!("File overwritten (verified): {}", path.display()),
-            ))
+            );
+            if let Some(d) = diff {
+                r = r.with_diff(d);
+            }
+            Ok(r)
         } else {
             Ok(ToolResult::success(
                 &call.id,

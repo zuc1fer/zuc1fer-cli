@@ -1,4 +1,5 @@
 use crate::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
+use similar::{TextDiff};
 use std::path::PathBuf;
 
 pub struct EditTool;
@@ -86,16 +87,28 @@ impl Tool for EditTool {
             content.replacen(old, new, 1)
         };
 
+        let mut diff = Vec::new();
+        TextDiff::from_lines(&content, &new_content)
+            .unified_diff()
+            .header(&path.display().to_string(), &path.display().to_string())
+            .to_writer(&mut diff)
+            .ok();
+        let diff_str = String::from_utf8_lossy(&diff).to_string();
+
         std::fs::write(&path, &new_content)?;
 
-        Ok(ToolResult::success(
+        let mut r = ToolResult::success(
             &call.id,
             if replace_all {
                 format!("Replaced {occurrences} occurrences in {}", path.display())
             } else {
                 format!("Replaced 1 occurrence in {}", path.display())
             },
-        ))
+        );
+        if !diff_str.is_empty() {
+            r = r.with_diff(diff_str);
+        }
+        Ok(r)
     }
 }
 
