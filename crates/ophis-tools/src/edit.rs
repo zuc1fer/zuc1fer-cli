@@ -183,6 +183,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_edit_diff_on_replace() {
+        let (_f, path) = temp_file("hello world\nfoo bar\nbaz qux\n");
+        let call = ToolCall {
+            id: "t5".into(),
+            name: "edit".into(),
+            arguments: serde_json::json!({
+                "filePath": path.to_str().unwrap(),
+                "oldString": "foo bar",
+                "newString": "HELLO WORLD",
+            }),
+        };
+        let result = EditTool.execute(&call, &ctx()).await.unwrap();
+        assert!(!result.is_error);
+        let diff = result.metadata.as_ref().and_then(|m| m.get("diff"));
+        assert!(diff.is_some(), "Expected diff metadata on edit");
+        let diff = diff.unwrap();
+        assert!(diff.contains("-foo bar"), "Diff should show removed line: {diff}");
+        assert!(diff.contains("+HELLO WORLD"), "Diff should show added line: {diff}");
+    }
+
+    #[tokio::test]
     async fn test_edit_replace_all() {
         let (_f, path) = temp_file("foo\nfoo\nfoo\n");
         let call = ToolCall {
