@@ -7,10 +7,8 @@ pub struct LspTool {
 }
 
 impl LspTool {
-    pub fn new(working_dir: std::path::PathBuf) -> Self {
-        Self {
-            client: Arc::new(LspClient::new(working_dir)),
-        }
+    pub fn new(client: Arc<LspClient>) -> Self {
+        Self { client }
     }
 }
 

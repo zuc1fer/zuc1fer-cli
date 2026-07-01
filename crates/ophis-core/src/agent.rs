@@ -1,6 +1,7 @@
 use crate::code_index::CodeIndex;
 use crate::config::Config;
 use crate::indexer::Indexer;
+use crate::lsp_client::LspClient;
 use crate::lsp_tool::LspTool;
 use crate::mcp_bridge::McpBridge;
 use crate::mcp_tool::McpTool;
@@ -115,6 +116,7 @@ pub struct Agent {
     tool_registry: ToolRegistry,
     working_dir: std::path::PathBuf,
     repomap: Option<RepoMap>,
+    lsp_client: Option<Arc<LspClient>>,
     #[allow(dead_code)]
     code_index: Option<Arc<CodeIndex>>,
     mcp_status: Vec<(String, bool)>,
@@ -221,7 +223,7 @@ impl Agent {
             }
         }
 
-        let code_index = {
+        let (code_index, lsp_client) = {
             let repo_key = {
                 use std::hash::{Hash, Hasher};
                 let canon = working_dir
@@ -248,14 +250,16 @@ impl Agent {
             indexer.start();
 
             tool_registry.register(Arc::new(SemanticTool::new(ci.clone())));
-            tool_registry.register(Arc::new(LspTool::new(working_dir.clone())));
+
+            let lsp_client = Arc::new(LspClient::new(working_dir.clone()));
+            tool_registry.register(Arc::new(LspTool::new(lsp_client.clone())));
 
             let plugins = plugin_manager::discover_plugins(&mut tool_registry)?;
             if !plugins.is_empty() {
                 tracing::info!("Loaded {} plugin(s): {}", plugins.len(), plugins.join(", "));
             }
 
-            Some(ci)
+            (Some(ci), lsp_client)
         };
 
         Ok(Self {
@@ -264,6 +268,7 @@ impl Agent {
             tool_registry,
             working_dir,
             repomap: Some(repomap),
+            lsp_client: Some(lsp_client),
             code_index,
             mcp_status,
             mcp_bridges,
@@ -794,7 +799,7 @@ impl Agent {
                 .execute_parallel(&approved_calls, &ctx)
                 .await;
 
-            let results = merge_tool_results(&tool_calls, executed, &denied);
+            let mut results = merge_tool_results(&tool_calls, executed, &denied);
 
             for result in &results {
                 if result.is_error {
@@ -830,6 +835,36 @@ impl Agent {
                         diff,
                         metadata: result.metadata.clone(),
                     });
+                }
+            }
+
+            // Auto-diagnostics: run LSP on written/edited files
+            if let Some(ref lsp) = self.lsp_client {
+                let mut enriched: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+                for (call, result) in tool_calls.iter().zip(results.iter()) {
+                    if (call.name == "write" || call.name == "edit") && !result.is_error {
+                        if let Some(fp) = call.arguments["filePath"].as_str() {
+                            match tokio::time::timeout(
+                                std::time::Duration::from_secs(2),
+                                lsp.diagnostics(fp),
+                            )
+                            .await
+                            {
+                                Ok(Ok(diags)) if !diags.is_empty() => {
+                                    enriched.insert(result.tool_call_id.clone(), diags.join("\n"));
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                if !enriched.is_empty() {
+                    for r in results.iter_mut() {
+                        if let Some(diag_text) = enriched.remove(&r.tool_call_id) {
+                            r.content.push_str("\n\n[LSP diagnostics]\n");
+                            r.content.push_str(&diag_text);
+                        }
+                    }
                 }
             }
 
