@@ -52,56 +52,6 @@ fn is_bg(c: Rgb) -> bool {
     (c.r as u16 + c.g as u16 + c.b as u16) / 3 > BG_THRESHOLD
 }
 
-/// Left-column data: (display text, optional style).
-/// When style is `None` the line is blank.
-const LEFT_ROWS: &[(&str, bool)] = &[
-    ("█████ █████ ██ ██ █████ █████", true),
-    ("██ ██ ██ ██ ██ ██  ██  ██   ", true),
-    ("██ ██ █████ █████  ██  █████", true),
-    ("██ ██ ██    ██ ██  ██     ██", true),
-    ("█████ ██    ██ ██ █████ █████", true),
-    ("", false),
-    ("a recursive coding agent", true),
-    ("", false),
-    ("created by zuc1fer", true),
-    ("zuc1fer.business@gmail.com", true),
-    ("https://t.me/zuc1fer", true),
-    ("https://github.com/zuc1fer", true),
-    ("", false),
-    (
-        "type a message to begin  \u{00B7}  /help  \u{00B7}  /models",
-        true,
-    ),
-];
-
-const LEFT_WIDTH: u16 = 38;
-
-fn left_line_style(is_art: bool) -> Style {
-    if is_art {
-        Style::default().fg(theme::ACCENT_LIGHT)
-    } else {
-        Style::default().fg(theme::TEXT_DIM)
-    }
-}
-
-fn build_left_column() -> Vec<(String, Style)> {
-    let mut col: Vec<(String, Style)> = Vec::with_capacity(LEFT_ROWS.len());
-
-    let mut art_idx = 0;
-    for (text, styled) in LEFT_ROWS {
-        let style = if *styled {
-            let is_art = art_idx < 5;
-            art_idx += 1;
-            left_line_style(is_art)
-        } else {
-            Style::default()
-        };
-        col.push((text.to_string(), style));
-    }
-
-    col
-}
-
 fn render_ouroboros(out_w: u32, out_h: u32) -> Vec<Line<'static>> {
     let (src_w, src_h, pixels) = get_source();
     let out_scanlines = out_h * 2;
@@ -151,20 +101,82 @@ fn render_ouroboros(out_w: u32, out_h: u32) -> Vec<Line<'static>> {
     lines
 }
 
+/// 7-row detailed ASCII art for "ophis". Each row is exactly 39 columns.
+const OPHIS_ART: [&str; 7] = [
+    " █████  ██████  ██   ██ ███████ ██████ ",
+    "██   ██ ██   ██ ██   ██    ██  ██     ",
+    "██   ██ ██   ██ ██   ██    ██  ██     ",
+    "██   ██ ██████  ███████    ██  ██████ ",
+    "██   ██ ██     ██   ██    ██       ██",
+    "██   ██ ██     ██   ██    ██       ██",
+    " █████  ██     ██   ██ ███████ ██████ ",
+];
+
+const LEFT_WIDTH: u16 = 42;
+
+const ART_WIDTH: usize = 39;
+
+const TAGLINE: &str = "\u{27B3}  a recursive coding agent  \u{27B3}";
+
+fn pad_art(s: &str) -> String {
+    let mut out = String::with_capacity(ART_WIDTH);
+    out.push_str(s);
+    while out.chars().count() < ART_WIDTH {
+        out.push(' ');
+    }
+    out
+}
+
+fn build_left_column() -> Vec<(String, Style)> {
+    let mut col: Vec<(String, Style)> = Vec::with_capacity(20);
+
+    let art_style = Style::default().fg(theme::ACCENT_LIGHT);
+
+    for row in &OPHIS_ART {
+        col.push((pad_art(row), art_style));
+    }
+
+    col.push((String::new(), Style::default()));
+
+    col.push((TAGLINE.to_string(), Style::default().fg(theme::ACCENT)));
+
+    col.push((String::new(), Style::default()));
+
+    col.push((
+        "created by zuc1fer".to_string(),
+        Style::default().fg(theme::TEXT_DIM),
+    ));
+    col.push((
+        "zuc1fer.business@gmail.com".to_string(),
+        Style::default().fg(theme::ACCENT_DIM),
+    ));
+    col.push((
+        "https://t.me/zuc1fer".to_string(),
+        Style::default().fg(theme::ACCENT_DIM),
+    ));
+    col.push((
+        "https://github.com/zuc1fer".to_string(),
+        Style::default().fg(theme::ACCENT_DIM),
+    ));
+
+    col.push((String::new(), Style::default()));
+
+    col.push((
+        "type a message to begin  \u{00B7}  /help  \u{00B7}  /models".to_string(),
+        Style::default().fg(theme::TEXT_DIM),
+    ));
+
+    col
+}
+
 pub fn splash_display(term_width: u16, term_height: u16) -> Vec<Line<'static>> {
     let left = build_left_column();
-    let left_row_count = left.len();
+    let left_count = left.len() as u16;
 
-    let img_w: u32 = if term_width >= 52 {
-        ((term_width as u32).saturating_sub(LEFT_WIDTH as u32 + 4))
-            .min(28)
-            .max(14)
-    } else {
-        0
-    };
+    let img_col_w: u32 = (term_width as u32).saturating_sub(LEFT_WIDTH as u32 + 4);
 
-    if img_w < 14 {
-        let mut out: Vec<Line<'static>> = Vec::with_capacity(left_row_count);
+    if img_col_w < 24 || term_width < 54 {
+        let mut out: Vec<Line<'static>> = Vec::with_capacity(left_count as usize);
         for (text, style) in &left {
             if style.fg.is_some() {
                 out.push(Line::from(Span::styled(text.clone(), *style)));
@@ -175,30 +187,33 @@ pub fn splash_display(term_width: u16, term_height: u16) -> Vec<Line<'static>> {
         return out;
     }
 
-    let src_ratio = {
-        let (w, h, _) = get_source();
-        w as f64 / h as f64
-    };
     let char_adj = 0.50;
     let max_h = (term_height as u32).saturating_sub(5).max(2);
+    let max_w = img_col_w;
+    let (src_w, src_h, _) = get_source();
+    let src_ratio = src_w as f64 / src_h as f64;
 
-    let out_w = img_w;
-    let out_h = ((out_w as f64 * char_adj / src_ratio).max(2.0) as u32).min(max_h);
+    let w_from_h = (max_h as f64 / char_adj * src_ratio) as u32;
+    let (out_w, out_h) = if w_from_h >= max_w.min(40) {
+        (w_from_h.min(max_w).max(20), max_h)
+    } else {
+        let h_from_w = (max_w as f64 * char_adj / src_ratio).max(1.0) as u32;
+        (max_w, h_from_w.min(max_h).max(2))
+    };
 
     let right = render_ouroboros(out_w, out_h);
-    let right_row_count = right.len();
+    let right_count = right.len();
 
-    let total_rows = left_row_count.max(right_row_count);
-    let right_offset = left_row_count.saturating_sub(right_row_count) / 2;
+    let total_rows = left_count.max(right_count as u16);
+    let right_pad_top = left_count.saturating_sub(right_count as u16) / 2;
 
-    let mut result: Vec<Line<'static>> = Vec::with_capacity(total_rows);
-    let gap = Span::raw("  ");
+    let mut result: Vec<Line<'static>> = Vec::with_capacity(total_rows as usize);
 
     for i in 0..total_rows {
         let mut spans: Vec<Span<'static>> = Vec::new();
 
-        if i < left_row_count {
-            let (text, style) = &left[i];
+        if (i as usize) < left.len() {
+            let (text, style) = &left[i as usize];
             if style.fg.is_some() {
                 let padded = format!("{text:width$}", width = LEFT_WIDTH as usize);
                 spans.push(Span::styled(padded, *style));
@@ -209,15 +224,45 @@ pub fn splash_display(term_width: u16, term_height: u16) -> Vec<Line<'static>> {
             spans.push(Span::raw(" ".repeat(LEFT_WIDTH as usize)));
         }
 
-        spans.push(gap.clone());
+        spans.push(Span::raw("  "));
 
-        if i >= right_offset && (i - right_offset) < right_row_count {
-            let img_idx = i - right_offset;
-            spans.extend(right[img_idx].spans.clone());
+        let img_i = i.wrapping_sub(right_pad_top);
+        if (img_i as usize) < right_count {
+            spans.extend(right[img_i as usize].spans.clone());
         }
 
         result.push(Line::from(spans));
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ophis_art_is_padded_to_39() {
+        let col = build_left_column();
+        for (i, (text, _)) in col.iter().enumerate().take(7) {
+            assert_eq!(
+                text.chars().count(),
+                ART_WIDTH,
+                "left column row {i} is {} chars wide, expected {ART_WIDTH}",
+                text.chars().count()
+            );
+        }
+    }
+
+    #[test]
+    fn splash_does_not_panic() {
+        let result = splash_display(120, 40);
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn splash_fallback_narrow() {
+        let result = splash_display(50, 40);
+        assert!(!result.is_empty());
+    }
 }
