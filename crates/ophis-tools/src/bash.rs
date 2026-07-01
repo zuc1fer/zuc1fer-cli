@@ -1,3 +1,4 @@
+use crate::error_parse::extract_errors;
 use crate::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
@@ -137,7 +138,15 @@ impl Tool for BashTool {
                         "\n\n[output truncated: {end} of {total} bytes shown]"
                     ));
                 }
-                Ok(ToolResult::success(&call.id, output))
+                let mut result = ToolResult::success(&call.id, output.clone());
+                result = result.with_metadata("exit_code", code.unwrap_or(-1).to_string());
+                let parsed = extract_errors(&output);
+                if !parsed.is_empty() {
+                    if let Ok(json) = serde_json::to_string(&parsed) {
+                        result = result.with_metadata("errors", json);
+                    }
+                }
+                Ok(result)
             }
             Ok(Err(e)) => Ok(ToolResult::error(&call.id, format!("Failed: {e}"))),
             Err(_) => Ok(ToolResult::error(
