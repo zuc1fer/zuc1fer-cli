@@ -56,6 +56,13 @@ impl ToolResult {
         }
     }
 
+    pub fn with_diff(mut self, diff: String) -> Self {
+        let mut m = self.metadata.unwrap_or_default();
+        m.insert("diff".into(), diff);
+        self.metadata = Some(m);
+        self
+    }
+
     pub fn truncated(&self) -> bool {
         self.metadata
             .as_ref()
@@ -110,6 +117,15 @@ mod tests {
         let result = ToolResult::error("call_2", "something went wrong");
         assert_eq!(result.tool_call_id, "call_2");
         assert!(result.is_error);
+    }
+
+    #[test]
+    fn test_tool_result_with_diff() {
+        let r = ToolResult::success("t1", "file modified");
+        let r = r.with_diff("--- old\n+++ new\n@@ -1 +1 @@\n-foo\n+bar\n".into());
+        assert!(!r.is_error);
+        let m = r.metadata.unwrap();
+        assert_eq!(m.get("diff").unwrap(), "--- old\n+++ new\n@@ -1 +1 @@\n-foo\n+bar\n");
     }
 
     #[test]

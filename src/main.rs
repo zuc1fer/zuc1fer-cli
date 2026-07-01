@@ -507,13 +507,14 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
                         });
                         println!("{}", entry);
                     }
-                    AgentEvent::ToolResultInfo { id, content, is_error, turn } => {
+                    AgentEvent::ToolResultInfo { id, content, is_error, turn, diff } => {
                         let entry = serde_json::json!({
                             "type": "tool_result",
                             "turn": turn,
                             "id": id,
                             "content": content,
                             "is_error": is_error,
+                            "diff": diff,
                             "timestamp": now,
                         });
                         println!("{}", entry);
