@@ -1,4 +1,5 @@
 use crate::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
+use similar::{TextDiff};
 use std::path::PathBuf;
 
 pub struct EditTool;
@@ -8,7 +9,7 @@ impl Tool for EditTool {
     fn definition(&self) -> ToolDef {
         ToolDef {
             name: "edit".into(),
-            description: "Perform exact string replacements in a file. When editing, preserve the exact indentation (tabs/spaces) as it appears. The edit will fail if oldString is not unique in the file — provide more surrounding context to make it unique.".into(),
+            description: "Perform exact string replacements in a file. Use for surgical changes to existing files (prefer over write for small edits). Provide enough surrounding context in oldString to make it unique. Use replaceAll for renaming across the whole file. Preserve exact indentation when matching.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -86,16 +87,28 @@ impl Tool for EditTool {
             content.replacen(old, new, 1)
         };
 
+        let mut diff = Vec::new();
+        TextDiff::from_lines(&content, &new_content)
+            .unified_diff()
+            .header(&path.display().to_string(), &path.display().to_string())
+            .to_writer(&mut diff)
+            .ok();
+        let diff_str = String::from_utf8_lossy(&diff).to_string();
+
         std::fs::write(&path, &new_content)?;
 
-        Ok(ToolResult::success(
+        let mut r = ToolResult::success(
             &call.id,
             if replace_all {
                 format!("Replaced {occurrences} occurrences in {}", path.display())
             } else {
                 format!("Replaced 1 occurrence in {}", path.display())
             },
-        ))
+        );
+        if !diff_str.is_empty() {
+            r = r.with_diff(diff_str);
+        }
+        Ok(r)
     }
 }
 
@@ -167,6 +180,27 @@ mod tests {
         };
         let result = EditTool.execute(&call, &ctx()).await.unwrap();
         assert!(result.is_error);
+    }
+
+    #[tokio::test]
+    async fn test_edit_diff_on_replace() {
+        let (_f, path) = temp_file("hello world\nfoo bar\nbaz qux\n");
+        let call = ToolCall {
+            id: "t5".into(),
+            name: "edit".into(),
+            arguments: serde_json::json!({
+                "filePath": path.to_str().unwrap(),
+                "oldString": "foo bar",
+                "newString": "HELLO WORLD",
+            }),
+        };
+        let result = EditTool.execute(&call, &ctx()).await.unwrap();
+        assert!(!result.is_error);
+        let diff = result.metadata.as_ref().and_then(|m| m.get("diff"));
+        assert!(diff.is_some(), "Expected diff metadata on edit");
+        let diff = diff.unwrap();
+        assert!(diff.contains("-foo bar"), "Diff should show removed line: {diff}");
+        assert!(diff.contains("+HELLO WORLD"), "Diff should show added line: {diff}");
     }
 
     #[tokio::test]

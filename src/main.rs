@@ -141,13 +141,30 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
     let working_dir = std::env::current_dir()?;
     let mut config = Config::load()?;
 
-    for arg in args.iter().skip(2) {
+    let mut _verbose = false;
+
+    let mut args_iter = args.iter().skip(2);
+    while let Some(arg) = args_iter.next() {
         if let Some(model) = arg.strip_prefix("--model=") {
             config.model = model.to_string();
+        } else if arg == "--model" {
+            if let Some(model) = args_iter.next() {
+                config.model = model.to_string();
+            }
         } else if arg == "--safe" {
             config.safe_mode = true;
         } else if arg == "--confirm" {
             config.require_approval = true;
+        } else if arg == "--verbose" {
+            _verbose = true;
+        } else if arg == "--no-repomap" {
+            config.no_repomap = true;
+        } else if arg == "--format" || arg == "--format=json" {
+            // ignored in TUI mode
+        } else if let Some(turns) = arg.strip_prefix("--max-turns=") {
+            if let Ok(n) = turns.parse::<u32>() {
+                config.max_turns = n;
+            }
         }
     }
 
@@ -201,6 +218,7 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                             let _ = event_tx_clone.send(AgentEvent::Tokens {
                                 input: usage.prompt_tokens,
                                 output: usage.completion_tokens,
+                                turn: 0,
                             });
                         }
                     }
@@ -225,12 +243,14 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                 AgentEvent::Tool(s) => app.add_system_message(s),
                 AgentEvent::Status(s) => app.add_system_message(s),
                 AgentEvent::Error(e) => app.add_system_message(format!("Error: {e}")),
-                AgentEvent::Tokens { input, output } => {
+                AgentEvent::Tokens { input, output, .. } => {
                     app.tokens_in += input;
                     app.tokens_out += output;
                     app.update_cost();
                 }
-                AgentEvent::TurnEnd => app.next_turn(),
+                AgentEvent::ToolCallInfo { .. } => {}
+                AgentEvent::ToolResultInfo { .. } => {}
+                AgentEvent::TurnEnd { .. } => app.next_turn(),
                 AgentEvent::Done => {
                     app.end_streaming();
                     app.status = "Ready".into();
@@ -375,16 +395,36 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
     let mut config = Config::load()?;
 
     let mut one_shot_prompt: Option<String> = None;
+    let mut verbose = false;
 
-    for arg in args.iter().skip(2) {
+    let mut args_iter = args.iter().skip(2);
+    while let Some(arg) = args_iter.next() {
         if arg == "--safe" {
             config.safe_mode = true;
         } else if arg == "--confirm" {
             config.require_approval = true;
+        } else if arg == "--verbose" {
+            verbose = true;
+        } else if arg == "--no-repomap" {
+            config.no_repomap = true;
+        } else if arg == "--format" || arg == "--format=json" {
+            // parsed, handled downstream
+        } else if let Some(turns) = arg.strip_prefix("--max-turns=") {
+            if let Ok(n) = turns.parse::<u32>() {
+                config.max_turns = n;
+            }
         } else if let Some(model) = arg.strip_prefix("--model=") {
             config.model = model.to_string();
+        } else if arg == "--model" {
+            if let Some(model) = args_iter.next() {
+                config.model = model.to_string();
+            }
         } else if let Some(prompt) = arg.strip_prefix("--prompt=") {
             one_shot_prompt = Some(prompt.to_string());
+        } else if arg == "--prompt" {
+            if let Some(prompt) = args_iter.next() {
+                one_shot_prompt = Some(prompt.to_string());
+            }
         }
     }
 
@@ -396,7 +436,7 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
         .get(provider)
         .ok_or_else(|| anyhow::anyhow!("No config for provider '{provider}'. Set {provider}_API_KEY or add to ~/.config/ophis/config.toml"))?;
 
-    if provider_config.api_key.is_empty() {
+    if provider_config.api_key.is_empty() && provider != "opencode" {
         anyhow::bail!(
             "No API key for provider '{provider}'. Set {}_API_KEY environment variable.",
             provider.to_uppercase()
@@ -415,26 +455,155 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
     );
 
     if let Some(prompt) = one_shot_prompt {
-        println!("ophis v{VERSION}  |  model: {}", session.model);
-        let result = rt.block_on(agent.run(&mut session, &prompt));
-        match result {
-            Ok(response) => {
-                if let Some(usage) = &response.usage {
-                    let cache_hit = usage
-                        .cache_read_tokens
-                        .map(|t| format!(" ({} cached)", t))
-                        .unwrap_or_default();
-                    tracing::debug!(
-                        "Tokens: {} in + {} out = {}{}",
-                        usage.prompt_tokens,
-                        usage.completion_tokens,
-                        usage.total_tokens,
-                        cache_hit,
-                    );
+        let json_output = args.iter().any(|a| a == "--format" || a == "--format=json");
+
+        if json_output {
+            let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+            let agent = agent.with_tui(event_tx.clone());
+
+            let session_id = session.id.clone();
+            let start = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+
+            let header = serde_json::json!({
+                "type": "session_start",
+                "session": session_id,
+                "model": session.model,
+                "timestamp": start,
+            });
+            println!("{}", header);
+
+            let result = rt.block_on(agent.run(&mut session, &prompt));
+
+            while let Some(event) = event_rx.blocking_recv() {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis();
+                match event {
+                    AgentEvent::TurnEnd { turn, tokens } => {
+                        let entry = serde_json::json!({
+                            "type": "turn_end",
+                            "turn": turn,
+                            "tokens": {
+                                "input": tokens.prompt_tokens,
+                                "output": tokens.completion_tokens,
+                                "total": tokens.total_tokens,
+                            },
+                            "timestamp": now,
+                        });
+                        println!("{}", entry);
+                    }
+                    AgentEvent::ToolCallInfo { id, name, input, turn } => {
+                        let entry = serde_json::json!({
+                            "type": "tool_call",
+                            "turn": turn,
+                            "id": id,
+                            "tool": name,
+                            "input": input,
+                            "timestamp": now,
+                        });
+                        println!("{}", entry);
+                    }
+                    AgentEvent::ToolResultInfo { id, content, is_error, turn, diff } => {
+                        let entry = serde_json::json!({
+                            "type": "tool_result",
+                            "turn": turn,
+                            "id": id,
+                            "content": content,
+                            "is_error": is_error,
+                            "diff": diff,
+                            "timestamp": now,
+                        });
+                        println!("{}", entry);
+                    }
+                    AgentEvent::Text(t) => {
+                        let entry = serde_json::json!({
+                            "type": "text",
+                            "content": t,
+                            "timestamp": now,
+                        });
+                        println!("{}", entry);
+                    }
+                    AgentEvent::Error(e) => {
+                        let entry = serde_json::json!({
+                            "type": "error",
+                            "content": e,
+                            "timestamp": now,
+                        });
+                        println!("{}", entry);
+                    }
+                    AgentEvent::Done => {
+                        let entry = serde_json::json!({
+                            "type": "done",
+                            "timestamp": now,
+                        });
+                        println!("{}", entry);
+                        break;
+                    }
+                    _ => {}
                 }
             }
-            Err(e) => {
-                eprintln!("Error: {e}");
+
+            if let Ok(response) = result {
+                if let Some(usage) = &response.usage {
+                    let footer = serde_json::json!({
+                        "type": "usage",
+                        "tokens": {
+                            "input": usage.prompt_tokens,
+                            "output": usage.completion_tokens,
+                            "total": usage.total_tokens,
+                            "cache_read": usage.cache_read_tokens,
+                            "cache_write": usage.cache_write_tokens,
+                        },
+                        "timestamp": std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis(),
+                    });
+                    println!("{}", footer);
+                }
+            }
+        } else {
+            println!("ophis v{VERSION}  |  model: {}", session.model);
+            let result = rt.block_on(agent.run(&mut session, &prompt));
+            match result {
+                Ok(response) => {
+                    if let Some(usage) = &response.usage {
+                        let cache_read = usage
+                            .cache_read_tokens
+                            .map(|t| format!(" ({} cached)", t))
+                            .unwrap_or_default();
+                        let cache_write = usage
+                            .cache_write_tokens
+                            .map(|t| format!(" ({} written)", t))
+                            .unwrap_or_default();
+                        if verbose {
+                            eprintln!(
+                                "[ophis] Tokens: {} in + {} out = {}{}{}",
+                                usage.prompt_tokens,
+                                usage.completion_tokens,
+                                usage.total_tokens,
+                                cache_read,
+                                cache_write,
+                            );
+                        } else {
+                            tracing::debug!(
+                                "Tokens: {} in + {} out = {}{}{}",
+                                usage.prompt_tokens,
+                                usage.completion_tokens,
+                                usage.total_tokens,
+                                cache_read,
+                                cache_write,
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                }
             }
         }
         return Ok(());
@@ -499,17 +668,33 @@ fn run_interactive(args: &[String]) -> anyhow::Result<()> {
         match result {
             Ok(response) => {
                 if let Some(usage) = &response.usage {
-                    let cache_hit = usage
+                    let cache_read = usage
                         .cache_read_tokens
                         .map(|t| format!(" ({} cached)", t))
                         .unwrap_or_default();
-                    tracing::debug!(
-                        "Tokens: {} in + {} out = {}{}",
-                        usage.prompt_tokens,
-                        usage.completion_tokens,
-                        usage.total_tokens,
-                        cache_hit,
-                    );
+                    let cache_write = usage
+                        .cache_write_tokens
+                        .map(|t| format!(" ({} written)", t))
+                        .unwrap_or_default();
+                    if verbose {
+                        eprintln!(
+                            "[ophis] Tokens: {} in + {} out = {}{}{}",
+                            usage.prompt_tokens,
+                            usage.completion_tokens,
+                            usage.total_tokens,
+                            cache_read,
+                            cache_write,
+                        );
+                    } else {
+                        tracing::debug!(
+                            "Tokens: {} in + {} out = {}{}{}",
+                            usage.prompt_tokens,
+                            usage.completion_tokens,
+                            usage.total_tokens,
+                            cache_read,
+                            cache_write,
+                        );
+                    }
                 }
             }
             Err(e) => {
@@ -676,21 +861,36 @@ fn handle_palette_command(app: &mut ophis_tui::App, cmd: &str) {
 fn print_usage(bin: &str) {
     println!("ophis v{VERSION} — the coding agent CLI\n");
     println!("Usage:");
-    println!("  {bin} chat [--model=provider/model] [--tui] [--safe]");
+    println!("  {bin} chat [--model=provider/model] [--tui] [--safe] [--confirm] [--verbose]");
+    println!("  {bin} chat --prompt=\"prompt\" [--model=provider/model] [--safe] [--verbose]");
     println!("  {bin} models");
     println!("  {bin} config");
     println!("  {bin} --version");
     println!();
+    println!("Flags:");
+    println!("  --model=<provider/model>  Model to use (e.g., opencode/deepseek-v4-flash-free)");
+    println!("  --tui                     Launch the terminal UI");
+    println!("  --safe                    Restrict to read-only tools");
+    println!("  --confirm                 Require approval before write/edit/bash");
+    println!("  --verbose                 Print per-turn token usage");
+    println!("  --format json             NDJSON structured output (one-shot mode)");
+    println!("  --max-turns=<N>           Max tool-call turns before stopping (default: 100)");
+    println!("  --no-repomap              Skip repository map context (faster startup)");
+    println!("  --prompt=<text>           One-shot prompt (non-interactive)");
+    println!();
     println!("Examples:");
     println!("  {bin} chat --model=deepseek/deepseek-chat");
-    println!("  {bin} chat --tui --model=deepseek/deepseek-chat");
-    println!("  {bin} chat --prompt=\"explain this project\"");
+    println!("  {bin} chat --tui");
+    println!("  {bin} chat --prompt=\"explain this project\" --verbose");
+    println!("  {bin} chat --prompt=\"refactor this\" --format json");
+    println!("  {bin} chat --prompt=\"fix bug\" --max-turns=5");
     println!();
     println!("Environment variables:");
-    println!("  DEEPSEEK_API_KEY   DeepSeek API key");
-    println!("  ANTHROPIC_API_KEY  Anthropic API key");
-    println!("  OPENAI_API_KEY     OpenAI API key");
-    println!("  OPHIS_LOG        Log level (trace, debug, info, warn, error)");
+    println!("  DEEPSEEK_API_KEY    DeepSeek API key");
+    println!("  ANTHROPIC_API_KEY   Anthropic API key");
+    println!("  OPENAI_API_KEY      OpenAI API key");
+    println!("  OPENCODE_API_KEY    OpenCode API key (optional for free models)");
+    println!("  OPHIS_LOG           Log level (trace, debug, info, warn, error)");
 }
 
 fn print_session_help() {

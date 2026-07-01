@@ -13,6 +13,8 @@ pub struct Config {
     #[serde(default)]
     pub require_approval: bool,
     #[serde(default)]
+    pub no_repomap: bool,
+    #[serde(default)]
     pub mcp: Vec<McpServerConfig>,
 }
 
@@ -69,6 +71,13 @@ impl Default for Config {
                 base_url: Some("http://localhost:11434".into()),
             },
         );
+        providers.insert(
+            "opencode".into(),
+            ProviderConfig {
+                api_key: std::env::var("OPENCODE_API_KEY").unwrap_or_default(),
+                base_url: None,
+            },
+        );
 
         Self {
             model: "deepseek/deepseek-v4-pro".into(),
@@ -79,6 +88,7 @@ impl Default for Config {
             system_prompt: None,
             safe_mode: false,
             require_approval: false,
+            no_repomap: false,
             mcp: Vec::new(),
         }
     }
@@ -93,6 +103,11 @@ impl Config {
             let content = std::fs::read_to_string(&config_path)?;
             let mut config: Config = toml::from_str(&content)?;
 
+            let defaults = Config::default();
+            for (name, default_provider) in defaults.providers {
+                config.providers.entry(name).or_insert(default_provider);
+            }
+
             for (_, provider) in config.providers.iter_mut() {
                 if provider.api_key.starts_with("$") {
                     let var = &provider.api_key[1..];
@@ -102,7 +117,6 @@ impl Config {
 
             if config.model == "deepseek/deepseek-chat" {
                 config.model = "deepseek/deepseek-v4-pro".into();
-                std::fs::write(&config_path, toml::to_string_pretty(&config)?)?;
             }
 
             Ok(config)

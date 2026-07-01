@@ -1,4 +1,5 @@
 use crate::{Tool, ToolCall, ToolContext, ToolDef, ToolResult};
+use similar::TextDiff;
 use std::path::PathBuf;
 
 pub struct WriteTool;
@@ -105,6 +106,19 @@ impl Tool for WriteTool {
         }
 
         let existed = path.exists();
+        let diff = if existed {
+            std::fs::read_to_string(&path).ok().map(|old| {
+                let mut buf = Vec::new();
+                TextDiff::from_lines(&old, &content)
+                    .unified_diff()
+                    .header("old", "new")
+                    .to_writer(&mut buf)
+                    .ok();
+                String::from_utf8_lossy(&buf).to_string()
+            })
+        } else {
+            None
+        };
         std::fs::write(&path, &content)?;
 
         let verify = std::fs::read_to_string(&path).unwrap_or_default();
@@ -132,10 +146,14 @@ impl Tool for WriteTool {
         }
 
         if existed {
-            Ok(ToolResult::success(
+            let mut r = ToolResult::success(
                 &call.id,
                 format!("File overwritten (verified): {}", path.display()),
-            ))
+            );
+            if let Some(d) = diff {
+                r = r.with_diff(d);
+            }
+            Ok(r)
         } else {
             Ok(ToolResult::success(
                 &call.id,
@@ -153,4 +171,60 @@ fn diff_strings(a: &str, b: &str) -> (usize, char, char) {
     }
     let len = a.len().min(b.len());
     (len, '\0', '\0')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn ctx() -> ToolContext {
+        ToolContext {
+            working_dir: std::env::temp_dir(),
+            safe_mode: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_write_diff_on_overwrite() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        let path = f.path().to_path_buf();
+        f.write_all(b"hello world\nfoo bar\n").unwrap();
+
+        let call = ToolCall {
+            id: "w1".into(),
+            name: "write".into(),
+            arguments: serde_json::json!({
+                "filePath": path.to_str().unwrap(),
+                "content": "hello world\nbaz qux\n",
+            }),
+        };
+        let result = WriteTool.execute(&call, &ctx()).await.unwrap();
+        assert!(!result.is_error, "{}", result.content);
+        let diff = result.metadata.as_ref().and_then(|m| m.get("diff"));
+        assert!(diff.is_some(), "Expected diff metadata on overwrite");
+        let diff = diff.unwrap();
+        assert!(diff.contains("-foo bar"), "Diff should show removed line");
+        assert!(diff.contains("+baz qux"), "Diff should show added line");
+    }
+
+    #[tokio::test]
+    async fn test_write_new_file_no_diff() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("new.txt");
+
+        let call = ToolCall {
+            id: "w2".into(),
+            name: "write".into(),
+            arguments: serde_json::json!({
+                "filePath": path.to_str().unwrap(),
+                "content": "brand new\n",
+            }),
+        };
+        let result = WriteTool.execute(&call, &ctx()).await.unwrap();
+        assert!(!result.is_error);
+        // New files should NOT have diff
+        let diff = result.metadata.as_ref().and_then(|m| m.get("diff"));
+        assert!(diff.is_none(), "New files should not have a diff");
+    }
 }

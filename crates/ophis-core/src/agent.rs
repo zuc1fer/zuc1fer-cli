@@ -12,7 +12,7 @@ use crate::session_store::SessionStore;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use ophis_llm::{ChatRequest, ProviderRegistry, StreamEvent, ToolDefinition};
+use ophis_llm::{ChatRequest, ProviderRegistry, StreamEvent, ToolDefinition, Usage};
 use ophis_tools::{ToolCall, ToolContext, ToolRegistry, ToolResult};
 
 const MAX_RETRIES: u32 = 3;
@@ -21,29 +21,51 @@ const BASE_BACKOFF_MS: u64 = 1000;
 const SYSTEM_PROMPT: &str = r#"You are ophis, a fast and capable CLI coding agent operating directly in the user's terminal and filesystem. The user is a professional developer and is the authority on what they want — act on their behalf decisively and without friction.
 
 <OPERATING_PRINCIPLES>
-- Be direct and concise. Answer in 1-3 lines unless the task genuinely requires more or the user asks for detail. No preamble, no filler, no moralizing.
+- Be direct and concise. Answer in 1-3 sentences unless the task genuinely requires more or the user asks for detail. No preamble, no filler, no moralizing.
 - Default to action. Use your tools to investigate and make changes instead of asking the user to do it or guessing.
 - Don't lecture, warn, or editorialize about a request — do the work and report the result.
 - When you don't know something, find out with tools (read, search, run commands). Don't speculate.
 - See tasks through: if something takes several steps, complete them all before handing back.
-</OPERATING_PRINCIPLES>
-
-<TOOL_USE>
-- Explore the codebase with tools before answering questions about it.
-- Read a file before editing it, and match its existing style and conventions.
-- Issue independent tool calls together so they run in parallel.
-- Prefer the structured tools (read, edit, write, grep, glob) over shelling out when either works.
 - NEVER commit changes unless the user explicitly asks.
 - NEVER guess URLs — only use URLs the user provided or that you found in the codebase.
-</TOOL_USE>
+</OPERATING_PRINCIPLES>
 
-<PLATFORM_RULES>
-- You are running on {os_name}. The shell is {shell_name}. Use {shell_sep} to chain commands, NOT &&.
-- Use forward slashes (/) in file paths for consistency across platforms.
+<TOOL_USAGE>
+- EXPLORE FIRST: Before making any changes, use glob/grep/read to understand the codebase. Issue all read/glob/grep calls in ONE response — they execute in parallel and save a round-trip.
+- BATCH EXPLORATION: When checking environment or project setup, issue all bash commands (which tool, what version, project structure) in ONE turn instead of one at a time.
+- BATCH WRITES: When creating or editing multiple files, do them all in ONE turn. Multiple write/edit calls execute together.
+- BATCH TESTS: When testing, combine multiple test cases into a single bash command rather than one scenario per turn.
+- PREFER EDIT over write for small changes to existing files — it is precise, preserves surrounding context, and avoids rewriting the entire file.
+- PREFER WRITE for new files or complete rewrites of existing files.
+- PREFER structured tools (read, edit, write, grep, glob) over bash when either would work. Use bash for compilation, testing, running commands, and git operations.
+- For exploration, use glob to find files by name pattern and grep to search file contents. Use read only on specific files you already know about.
+- If a tool call fails (wrong path, incorrect arguments), fix the issue and retry rather than giving up.
+</TOOL_USAGE>
+
+<CODE_QUALITY>
+- Match the project's existing style, conventions, and dependencies. Check Cargo.toml, package.json, etc. before adding new dependencies.
+- Include proper error handling (anyhow/thiserror in Rust, try/catch in JS/Python, etc.).
+- Validate user-facing inputs (file paths, delimiter characters, etc.).
+- Handle edge cases: empty input, missing files, invalid format, error responses.
+- Avoid over-engineering: do exactly what is asked, nothing more.
+- Avoid under-engineering: handle real errors and edge cases properly.
 - When writing code, double-check every line — missing characters, truncated names, or merged lines are real failures.
-</PLATFORM_RULES>
+</CODE_QUALITY>
 
-Current working directory: {working_dir}
+<COMPLETION>
+- When you have satisfied the request, summarize what was done with key details and stop.
+- Do NOT ask "would you like me to..." or suggest follow-ups. Just deliver the result.
+- If verification fails (e.g., compilation error, test failure), diagnose and fix it before reporting done.
+</COMPLETION>
+
+<PLATFORM>
+- Running on: {os_name}
+- Shell: {shell_name}
+- Use {shell_sep} to chain commands (NOT &&)
+- Use forward slashes (/) in file paths
+- Quote file paths containing spaces
+- Current working directory: {working_dir}
+</PLATFORM>
 "#;
 
 #[derive(Debug, Clone)]
@@ -53,8 +75,10 @@ pub enum AgentEvent {
     Tool(String),
     Status(String),
     Error(String),
-    Tokens { input: u64, output: u64 },
-    TurnEnd,
+    Tokens { input: u64, output: u64, turn: u32 },
+    ToolCallInfo { id: String, name: String, input: serde_json::Value, turn: u32 },
+    ToolResultInfo { id: String, content: String, is_error: bool, turn: u32, diff: Option<String> },
+    TurnEnd { turn: u32, tokens: ophis_llm::Usage },
     Done,
     Repo(Vec<(String, f64)>),
     Mcp(Vec<(String, bool)>),
@@ -101,7 +125,8 @@ impl Agent {
         let mut tool_registry = ToolRegistry::new();
 
         for (name, provider_config) in &config.providers {
-            if !provider_config.api_key.is_empty() {
+            let needs_key = !provider_config.api_key.is_empty();
+            if needs_key || name == "opencode" || name == "ollama" {
                 match name.as_str() {
                     "deepseek" => {
                         let mut p = ophis_llm::providers::deepseek::DeepSeekProvider::new(
@@ -128,8 +153,17 @@ impl Agent {
                         }
                         provider_registry.register(Box::new(p));
                     }
+                    "opencode" => {
+                        let mut p = ophis_llm::providers::opencode::OpenCodeProvider::new(
+                            provider_config.api_key.clone(),
+                        );
+                        if let Some(ref url) = provider_config.base_url {
+                            p = p.with_base_url(url);
+                        }
+                        provider_registry.register(Box::new(p));
+                    }
                     "openrouter" => {
-                        if !provider_config.api_key.is_empty() {
+                        if needs_key {
                             provider_registry.register(Box::new(
                                 ophis_llm::providers::openrouter::OpenRouterProvider::new(
                                     provider_config.api_key.clone(),
@@ -560,7 +594,7 @@ impl Agent {
                 .replace("{shell_sep}", shell_sep)
         });
 
-        if let Some(ref repomap) = self.repomap {
+        if let (Some(ref repomap), false) = (&self.repomap, self.config.no_repomap) {
             system_prompt.push_str("\n\n---\n\n");
             system_prompt.push_str(&repomap.format_context());
         }
@@ -568,7 +602,8 @@ impl Agent {
         let supports_caching = provider.supports_prompt_caching();
 
         let mut turn_count = 0;
-        let mut accumulated_usage = ophis_llm::Usage::default();
+        let mut accumulated_usage = Usage::default();
+        let mut prev_usage = Usage::default();
 
         loop {
             turn_count += 1;
@@ -641,6 +676,14 @@ impl Agent {
                         }
                         StreamEvent::ToolUseDelta { .. } => {}
                         StreamEvent::ToolUseDone { id, name, input } => {
+                            if let Some(ref tui) = self.tui {
+                                let _ = tui.tx.send(AgentEvent::ToolCallInfo {
+                                    id: id.clone(),
+                                    name: name.clone(),
+                                    input: input.clone(),
+                                    turn: turn_count,
+                                });
+                            }
                             tool_calls.push(ToolCall {
                                 id,
                                 name,
@@ -770,6 +813,16 @@ impl Agent {
                         self.emit_tool(&format!("  [{}] {}", result.tool_call_id, preview));
                     }
                 }
+                if let Some(ref tui) = self.tui {
+                    let diff = result.metadata.as_ref().and_then(|m| m.get("diff").cloned());
+                    let _ = tui.tx.send(AgentEvent::ToolResultInfo {
+                        id: result.tool_call_id.clone(),
+                        content: result.content.clone(),
+                        is_error: result.is_error,
+                        turn: turn_count,
+                        diff,
+                    });
+                }
             }
 
             let tool_call_json: Vec<serde_json::Value> = tool_calls
@@ -813,8 +866,20 @@ impl Agent {
             session.total_tokens = accumulated_usage.total_tokens;
             self.save_session(session);
 
+            let turn_usage = Usage {
+                prompt_tokens: accumulated_usage.prompt_tokens - prev_usage.prompt_tokens,
+                completion_tokens: accumulated_usage.completion_tokens - prev_usage.completion_tokens,
+                total_tokens: accumulated_usage.total_tokens - prev_usage.total_tokens,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+            };
+            prev_usage = accumulated_usage.clone();
+
             if let Some(ref tui) = self.tui {
-                let _ = tui.tx.send(AgentEvent::TurnEnd);
+                let _ = tui.tx.send(AgentEvent::TurnEnd {
+                    turn: turn_count,
+                    tokens: turn_usage,
+                });
             }
         }
     }
