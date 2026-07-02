@@ -1716,7 +1716,7 @@ fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> (Vec<Line<
                             if w.is_empty() {
                                 body.push(Line::from(""));
                             } else {
-                                body.push(Line::from(render_inline_markdown(&w)));
+                                body.push(Line::from(render_inline_markdown(&w, Style::default().fg(TEXT))));
                             }
                         }
                     }
@@ -1765,50 +1765,39 @@ fn render_markdown_line(line: &str) -> Vec<Span<'static>> {
         return vec![Span::raw("")];
     }
     if let Some(rest) = trimmed.strip_prefix("### ") {
-        return vec![Span::styled(
-            rest.to_string(),
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-        )];
+        let style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+        return render_inline_markdown(rest, style);
     }
     if let Some(rest) = trimmed.strip_prefix("## ") {
-        return vec![Span::styled(
-            rest.to_string(),
-            Style::default()
-                .fg(ACCENT_LIGHT)
-                .add_modifier(Modifier::BOLD),
-        )];
+        let style = Style::default().fg(ACCENT_LIGHT).add_modifier(Modifier::BOLD);
+        return render_inline_markdown(rest, style);
     }
     if let Some(rest) = trimmed.strip_prefix("# ") {
-        return vec![Span::styled(
-            rest.to_string(),
-            Style::default()
-                .fg(ACCENT_LIGHT)
-                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-        )];
+        let style = Style::default().fg(ACCENT_LIGHT).add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+        return render_inline_markdown(rest, style);
     }
     if let Some(content) = trimmed.strip_prefix("> ") {
-        return vec![Span::styled(
-            format!("│ {content}"),
-            Style::default()
-                .fg(ACCENT_DIM)
-                .add_modifier(Modifier::ITALIC),
-        )];
+        let style = Style::default().fg(ACCENT_DIM).add_modifier(Modifier::ITALIC);
+        let mut spans = vec![Span::styled("│ ", Style::default().fg(ACCENT_DIM))];
+        spans.extend(render_inline_markdown(content, style));
+        return spans;
     }
     if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
         let content = trimmed[2..].to_string();
-        return vec![
-            Span::styled("  • ", Style::default().fg(ACCENT)),
-            Span::styled(content, Style::default().fg(TEXT)),
-        ];
+        let mut spans = vec![Span::styled("  • ", Style::default().fg(ACCENT))];
+        spans.extend(render_inline_markdown(&content, Style::default().fg(TEXT)));
+        return spans;
     }
-    if let Some(cap) = numbered_prefix(trimmed) {
-        return vec![Span::styled(cap, Style::default().fg(TEXT))];
+    if let Some((prefix, content)) = parse_numbered_prefix(trimmed) {
+        let mut spans = vec![Span::styled(prefix, Style::default().fg(TEXT))];
+        spans.extend(render_inline_markdown(&content, Style::default().fg(TEXT)));
+        return spans;
     }
     if trimmed == "---" || trimmed == "***" || trimmed == "___" {
         let bar = "─".repeat(40);
         return vec![Span::styled(bar, Style::default().fg(ACCENT_DIM))];
     }
-    render_inline_markdown(line)
+    render_inline_markdown(line, Style::default().fg(TEXT))
 }
 
 fn numbered_prefix(s: &str) -> Option<String> {
@@ -1824,10 +1813,24 @@ fn numbered_prefix(s: &str) -> Option<String> {
     }
 }
 
-fn render_inline_markdown(line: &str) -> Vec<Span<'static>> {
+fn parse_numbered_prefix(s: &str) -> Option<(String, String)> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i > 0 && i < bytes.len() && bytes[i] == b'.' && i + 1 < bytes.len() && bytes[i + 1] == b' ' {
+        let prefix = format!("  {}. ", &s[..i]);
+        let content = s[i + 2..].trim().to_string();
+        Some((prefix, content))
+    } else {
+        None
+    }
+}
+
+fn render_inline_markdown(line: &str, base_style: Style) -> Vec<Span<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut remaining = line;
-    let base = Style::default().fg(TEXT);
 
     while !remaining.is_empty() {
         let next_marker = [
@@ -1842,27 +1845,30 @@ fn render_inline_markdown(line: &str) -> Vec<Span<'static>> {
 
         if let Some((pos, len)) = next_marker {
             if pos > 0 {
-                spans.push(Span::styled(remaining[..pos].to_string(), base));
+                spans.push(Span::styled(remaining[..pos].to_string(), base_style));
             }
             let marker = &remaining[pos..pos + len];
             remaining = &remaining[pos + len..];
 
             if let Some(end) = remaining.find(marker) {
                 let inner = &remaining[..end];
-                let style = match len {
-                    3 => base.add_modifier(Modifier::BOLD | Modifier::ITALIC),
-                    2 => base.add_modifier(Modifier::BOLD),
-                    1 if marker == "*" => base.add_modifier(Modifier::ITALIC),
-                    1 if marker == "`" => Style::default().fg(ACCENT_LIGHT).bg(SURFACE_LIGHT),
-                    _ => base,
+                let mut style = base_style;
+                match len {
+                    3 => style = style.add_modifier(Modifier::BOLD | Modifier::ITALIC),
+                    2 => style = style.add_modifier(Modifier::BOLD),
+                    1 if marker == "*" => style = style.add_modifier(Modifier::ITALIC),
+                    1 if marker == "`" => {
+                        style = style.fg(ACCENT_LIGHT).bg(SURFACE_LIGHT);
+                    }
+                    _ => {}
                 };
                 spans.push(Span::styled(inner.to_string(), style));
                 remaining = &remaining[end + len..];
             } else {
-                spans.push(Span::styled(marker.to_string(), base));
+                spans.push(Span::styled(marker.to_string(), base_style));
             }
         } else {
-            spans.push(Span::styled(remaining.to_string(), base));
+            spans.push(Span::styled(remaining.to_string(), base_style));
             break;
         }
     }
@@ -2186,7 +2192,7 @@ fn render_table_row_line(
         };
 
         spans.push(Span::styled(" ", Style::default().fg(TEXT)));
-        spans.push(Span::styled(formatted, style));
+        spans.extend(render_inline_markdown(&formatted, style));
         spans.push(Span::styled(" ", Style::default().fg(TEXT)));
         spans.push(Span::styled("│", Style::default().fg(ACCENT_DIM)));
     }
