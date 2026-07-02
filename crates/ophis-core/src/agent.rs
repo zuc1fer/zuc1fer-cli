@@ -805,29 +805,15 @@ impl Agent {
             let mut results = merge_tool_results(&tool_calls, executed, &denied);
 
             for result in &results {
-                if result.is_error {
-                    self.emit_tool(&format!(
-                        "  [{}] Error: {}",
-                        result.tool_call_id, result.content
-                    ));
+                let tool_call = approved_calls.iter().find(|tc| tc.id == result.tool_call_id);
+                let summary = if let Some(tc) = tool_call {
+                    format_tool_summary(&tc.name, &tc.arguments, result.is_error, &result.content)
                 } else {
-                    let preview: String = result
-                        .content
-                        .lines()
-                        .take(5)
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    if preview.len() < result.content.len() {
-                        self.emit_tool(&format!(
-                            "  [{}] {}\n  ... ({} more chars)",
-                            result.tool_call_id,
-                            preview,
-                            result.content.len() - preview.len()
-                        ));
-                    } else if !preview.is_empty() {
-                        self.emit_tool(&format!("  [{}] {}", result.tool_call_id, preview));
-                    }
-                }
+                    let status_icon = if result.is_error { "✖" } else { "✔" };
+                    format!("{} [{}] tool call completed", status_icon, result.tool_call_id)
+                };
+                self.emit_tool(&format!("  {}", summary));
+
                 if let Some(ref tui) = self.tui {
                     let diff = result.metadata.as_ref().and_then(|m| m.get("diff").cloned());
                     let _ = tui.tx.send(AgentEvent::ToolResultInfo {
@@ -1105,5 +1091,72 @@ mod tests {
             "/tmp/x"
         );
         assert_eq!(approval_detail("read", &serde_json::json!({})), "");
+    }
+}
+
+fn format_tool_summary(
+    name: &str,
+    args: &serde_json::Value,
+    is_error: bool,
+    result_content: &str,
+) -> String {
+    let status_icon = if is_error { "✖" } else { "✔" };
+    let summary = match name {
+        "read" => {
+            let file = args["filePath"].as_str().unwrap_or("unknown");
+            let file_name = std::path::Path::new(file)
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_else(|| file.to_string());
+            format!("read \"{}\"", file_name)
+        }
+        "glob" => {
+            let pattern = args["pattern"].as_str().unwrap_or("");
+            format!("glob \"{}\"", pattern)
+        }
+        "grep" => {
+            let pattern = args["pattern"].as_str().unwrap_or("");
+            format!("grep \"{}\"", pattern)
+        }
+        "bash" => {
+            let cmd = args["command"].as_str().unwrap_or("").trim();
+            let cmd_preview = if cmd.len() > 35 {
+                format!("{}...", &cmd[..35])
+            } else {
+                cmd.to_string()
+            };
+            format!("bash \"{}\"", cmd_preview)
+        }
+        "write" => {
+            let file = args["filePath"].as_str().unwrap_or("unknown");
+            let file_name = std::path::Path::new(file)
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_else(|| file.to_string());
+            format!("write \"{}\"", file_name)
+        }
+        "edit" => {
+            let file = args["filePath"].as_str().unwrap_or("unknown");
+            let file_name = std::path::Path::new(file)
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_else(|| file.to_string());
+            format!("edit \"{}\"", file_name)
+        }
+        other => {
+            format!("{} tool", other)
+        }
+    };
+
+    if is_error {
+        format!("{} {} - Error: {}", status_icon, summary, result_content.trim())
+    } else {
+        let line_count = result_content.lines().count();
+        if line_count > 1 {
+            format!("{} {} ({} lines)", status_icon, summary, line_count)
+        } else {
+            let size = result_content.len();
+            format!("{} {} ({} chars)", status_icon, summary, size)
+        }
     }
 }
