@@ -371,10 +371,31 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                 crossterm::event::Event::Mouse(mouse) => {
                     use crossterm::event::MouseEventKind;
                     match mouse.kind {
-                        MouseEventKind::ScrollUp => app.handle_mouse_scroll(-1),
-                        MouseEventKind::ScrollDown => app.handle_mouse_scroll(1),
+                        MouseEventKind::ScrollUp => app.handle_mouse_scroll(mouse.column, mouse.row, -1),
+                        MouseEventKind::ScrollDown => app.handle_mouse_scroll(mouse.column, mouse.row, 1),
                         MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-                            app.handle_mouse_click(mouse.column, mouse.row);
+                            if let Some(cmd) = app.handle_mouse_click(mouse.column, mouse.row) {
+                                if cmd == "__APPROVE__" || cmd == "__DENY__" || cmd == "__APPROVE_ALL__" {
+                                    let d = match cmd.as_str() {
+                                        "__APPROVE__" => Some(ApprovalDecision::Approve),
+                                        "__APPROVE_ALL__" => Some(ApprovalDecision::ApproveAll),
+                                        "__DENY__" => Some(ApprovalDecision::Deny),
+                                        _ => None,
+                                    };
+                                    if let Some(decision) = d {
+                                        if let Some(reply) = pending_reply.take() {
+                                            let _ = reply.send(decision);
+                                        }
+                                        app.pending_approval = None;
+                                    }
+                                } else if let Some(model) = cmd.strip_prefix("__MODEL_SELECT__:") {
+                                    let _ = prompt_tx.send(format!("/model {}", model));
+                                } else if let Some(sess) = cmd.strip_prefix("__SESSION_SELECT__:") {
+                                    let _ = prompt_tx.send(format!("/session resume {}", sess));
+                                } else {
+                                    let _ = prompt_tx.send(cmd);
+                                }
+                            }
                         }
                         _ => {}
                     }
