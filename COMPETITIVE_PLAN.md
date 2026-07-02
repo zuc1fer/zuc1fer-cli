@@ -24,6 +24,7 @@ A CLI coding agent that outperforms OpenCode, Codex, and Claude Code by combinin
 | **Tools** | 17 built-in tools | No MCP, no LSP integration |
 | **Persistence** | SQLite via Drizzle ORM | Single-file DB, no external stores |
 | **Context** | Epoch-based diffs | No prompt caching, limited compaction |
+hi my name is zino
 
 ### 1.2 OpenAI Codex (openai/codex) — Apache 2.0
 | Aspect | Implementation | Weakness |
