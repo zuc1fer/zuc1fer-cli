@@ -2089,14 +2089,14 @@ fn render_markdown_table(raw_lines: &[String], max_width: usize) -> Vec<Line<'st
         let mut remaining_budget = total_available;
         let mut dynamic_cols = Vec::new();
         for i in 0..num_cols {
-            if col_widths[i] <= 16 {
+            if col_widths[i] <= 24 {
                 remaining_budget = remaining_budget.saturating_sub(col_widths[i]);
             } else {
                 dynamic_cols.push(i);
             }
         }
 
-        if !dynamic_cols.is_empty() {
+        if !dynamic_cols.is_empty() && remaining_budget > 0 {
             let sum_dynamic: usize = dynamic_cols.iter().map(|&idx| col_widths[idx]).sum();
             let num_dynamic = dynamic_cols.len();
             for &idx in &dynamic_cols {
@@ -2200,34 +2200,53 @@ fn render_table_row_lines(
             let align = alignments[i];
             let cell_line_text = cell_lines[i].get(line_idx).cloned().unwrap_or_default();
 
-            let char_count = cell_line_text.chars().count();
-            let formatted = if char_count >= width {
-                cell_line_text.chars().take(width).collect::<String>()
-            } else {
-                let diff = width - char_count;
-                match align {
-                    Alignment::Right => {
-                        format!("{}{}", " ".repeat(diff), cell_line_text)
-                    }
-                    Alignment::Center => {
-                        let left_pad = diff / 2;
-                        let right_pad = diff - left_pad;
-                        format!("{}{}{}", " ".repeat(left_pad), cell_line_text, " ".repeat(right_pad))
-                    }
-                    _ => {
-                        format!("{}{}", cell_line_text, " ".repeat(diff))
-                    }
-                }
-            };
-
             let style = if is_header {
                 Style::default().fg(ACCENT_LIGHT).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(TEXT)
             };
 
+            let mut parsed_spans = render_inline_markdown(&cell_line_text, style);
+            let printed_len: usize = parsed_spans.iter().map(|s| s.content.chars().count()).sum();
+
+            if printed_len < width {
+                let diff = width - printed_len;
+                match align {
+                    Alignment::Right => {
+                        parsed_spans.insert(0, Span::styled(" ".repeat(diff), style));
+                    }
+                    Alignment::Center => {
+                        let left = diff / 2;
+                        let right = diff - left;
+                        parsed_spans.insert(0, Span::styled(" ".repeat(left), style));
+                        parsed_spans.push(Span::styled(" ".repeat(right), style));
+                    }
+                    _ => {
+                        parsed_spans.push(Span::styled(" ".repeat(diff), style));
+                    }
+                }
+            } else if printed_len > width {
+                let mut current_len = 0;
+                let mut truncated_spans = Vec::new();
+                for span in parsed_spans {
+                    let span_len = span.content.chars().count();
+                    if current_len + span_len <= width {
+                        truncated_spans.push(span);
+                        current_len += span_len;
+                    } else {
+                        let remaining_w = width - current_len;
+                        if remaining_w > 0 {
+                            let truncated_content: String = span.content.chars().take(remaining_w).collect();
+                            truncated_spans.push(Span::styled(truncated_content, span.style));
+                        }
+                        break;
+                    }
+                }
+                parsed_spans = truncated_spans;
+            }
+
             spans.push(Span::styled(" ", Style::default().fg(TEXT)));
-            spans.extend(render_inline_markdown(&formatted, style));
+            spans.extend(parsed_spans);
             spans.push(Span::styled(" ", Style::default().fg(TEXT)));
             spans.push(Span::styled("│", Style::default().fg(ACCENT_DIM)));
         }
