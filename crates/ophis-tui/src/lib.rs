@@ -1642,10 +1642,15 @@ fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> (Vec<Line<
                 let mut in_code_block = false;
                 let mut code_lang = String::new();
                 let mut code_buffer: Vec<String> = Vec::new();
-                for text_line in msg.text.lines() {
+
+                let lines_vec: Vec<&str> = msg.text.lines().collect();
+                let mut i = 0;
+                while i < lines_vec.len() {
+                    let text_line = lines_vec[i];
                     let trimmed = text_line.trim();
-                    if trimmed.starts_with("```") {
-                        if in_code_block {
+
+                    if in_code_block {
+                        if trimmed.starts_with("```") {
                             if !code_buffer.is_empty() {
                                 for hl in highlight_code(&code_buffer, &code_lang) {
                                     body.push(hl);
@@ -1658,20 +1663,43 @@ fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> (Vec<Line<
                                 Style::default().fg(ACCENT_DIM),
                             )));
                         } else {
-                            in_code_block = true;
-                            code_lang =
-                                trimmed.strip_prefix("```").unwrap_or("").trim().to_string();
-                            body.push(Line::from(Span::styled(
-                                text_line.to_string(),
-                                Style::default().fg(ACCENT_DIM),
-                            )));
+                            code_buffer.push(text_line.to_string());
+                        }
+                        i += 1;
+                        continue;
+                    }
+
+                    if trimmed.starts_with("```") {
+                        in_code_block = true;
+                        code_lang = trimmed.strip_prefix("```").unwrap_or("").trim().to_string();
+                        body.push(Line::from(Span::styled(
+                            text_line.to_string(),
+                            Style::default().fg(ACCENT_DIM),
+                        )));
+                        i += 1;
+                        continue;
+                    }
+
+                    // Table detection
+                    if trimmed.starts_with('|') && trimmed.ends_with('|') {
+                        let mut table_lines = vec![text_line.to_string()];
+                        i += 1;
+                        while i < lines_vec.len() {
+                            let nt = lines_vec[i].trim();
+                            if nt.starts_with('|') && nt.ends_with('|') {
+                                table_lines.push(lines_vec[i].to_string());
+                                i += 1;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        for rendered_line in render_markdown_table(&table_lines, content_width) {
+                            body.push(rendered_line);
                         }
                         continue;
                     }
-                    if in_code_block {
-                        code_buffer.push(text_line.to_string());
-                        continue;
-                    }
+
                     let trimmed_para = text_line.trim_start();
                     let is_block = trimmed_para.starts_with('#')
                         || trimmed_para.starts_with("- ")
@@ -1692,6 +1720,7 @@ fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> (Vec<Line<
                             }
                         }
                     }
+                    i += 1;
                 }
             }
             MessageRole::System => {
@@ -1801,35 +1830,36 @@ fn render_inline_markdown(line: &str) -> Vec<Span<'static>> {
     let base = Style::default().fg(TEXT);
 
     while !remaining.is_empty() {
-        if let Some(start) = remaining.find("**") {
-            if start > 0 {
-                spans.push(Span::styled(remaining[..start].to_string(), base));
+        let next_marker = [
+            (remaining.find("***"), 3),
+            (remaining.find("**"), 2),
+            (remaining.find("*"), 1),
+            (remaining.find("`"), 1),
+        ]
+        .into_iter()
+        .filter_map(|(pos, len)| pos.map(|p| (p, len)))
+        .min_by_key(|&(p, _)| p);
+
+        if let Some((pos, len)) = next_marker {
+            if pos > 0 {
+                spans.push(Span::styled(remaining[..pos].to_string(), base));
             }
-            remaining = &remaining[start + 2..];
-            if let Some(end) = remaining.find("**") {
-                spans.push(Span::styled(
-                    remaining[..end].to_string(),
-                    base.add_modifier(Modifier::BOLD),
-                ));
-                remaining = &remaining[end + 2..];
+            let marker = &remaining[pos..pos + len];
+            remaining = &remaining[pos + len..];
+
+            if let Some(end) = remaining.find(marker) {
+                let inner = &remaining[..end];
+                let style = match len {
+                    3 => base.add_modifier(Modifier::BOLD | Modifier::ITALIC),
+                    2 => base.add_modifier(Modifier::BOLD),
+                    1 if marker == "*" => base.add_modifier(Modifier::ITALIC),
+                    1 if marker == "`" => Style::default().fg(ACCENT_LIGHT).bg(SURFACE_LIGHT),
+                    _ => base,
+                };
+                spans.push(Span::styled(inner.to_string(), style));
+                remaining = &remaining[end + len..];
             } else {
-                spans.push(Span::styled(format!("**{remaining}"), base));
-                remaining = "";
-            }
-        } else if let Some(start) = remaining.find('`') {
-            if start > 0 {
-                spans.push(Span::styled(remaining[..start].to_string(), base));
-            }
-            remaining = &remaining[start + 1..];
-            if let Some(end) = remaining.find('`') {
-                spans.push(Span::styled(
-                    remaining[..end].to_string(),
-                    Style::default().fg(ACCENT_LIGHT).bg(SURFACE_LIGHT),
-                ));
-                remaining = &remaining[end + 1..];
-            } else {
-                spans.push(Span::styled(format!("`{remaining}"), base));
-                remaining = "";
+                spans.push(Span::styled(marker.to_string(), base));
             }
         } else {
             spans.push(Span::styled(remaining.to_string(), base));
@@ -1989,4 +2019,177 @@ fn highlight_code(lines: &[String], language: &str) -> Vec<Line<'static>> {
         result.push(Line::from(spans));
     }
     result
+}
+
+fn render_markdown_table(raw_lines: &[String], max_width: usize) -> Vec<Line<'static>> {
+    let mut parsed_rows: Vec<Vec<String>> = Vec::new();
+    let mut align_specs: Vec<Alignment> = Vec::new();
+
+    for line in raw_lines {
+        let cells = parse_table_row(line);
+        let is_separator = cells.iter().all(|c| {
+            let t = c.trim();
+            !t.is_empty() && t.chars().all(|ch| ch == '-' || ch == ':' || ch == ' ')
+        });
+
+        if is_separator {
+            for cell in &cells {
+                let t = cell.trim();
+                let left = t.starts_with(':');
+                let right = t.ends_with(':');
+                let align = if left && right {
+                    Alignment::Center
+                } else if right {
+                    Alignment::Right
+                } else {
+                    Alignment::Left
+                };
+                align_specs.push(align);
+            }
+        } else {
+            parsed_rows.push(cells);
+        }
+    }
+
+    if parsed_rows.is_empty() {
+        return Vec::new();
+    }
+
+    let num_cols = parsed_rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    if num_cols == 0 {
+        return Vec::new();
+    }
+
+    while align_specs.len() < num_cols {
+        align_specs.push(Alignment::Left);
+    }
+
+    let mut col_widths = vec![4; num_cols];
+    for row in &parsed_rows {
+        for (i, cell) in row.iter().enumerate() {
+            if i < num_cols {
+                col_widths[i] = col_widths[i].max(cell.chars().count());
+            }
+        }
+    }
+
+    let padding_per_col = 2;
+    let borders_width = num_cols + 1;
+    let total_padding_and_borders = num_cols * padding_per_col + borders_width;
+    let sum_widths: usize = col_widths.iter().sum();
+
+    if sum_widths + total_padding_and_borders > max_width {
+        let budget = max_width.saturating_sub(total_padding_and_borders);
+        if budget > 0 {
+            for w in &mut col_widths {
+                *w = ((*w as f64 / sum_widths as f64) * budget as f64) as usize;
+                if *w < 3 {
+                    *w = 3;
+                }
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+
+    let mut top_border = String::from("┌");
+    for (i, w) in col_widths.iter().enumerate() {
+        top_border.push_str(&"─".repeat(*w + 2));
+        if i < num_cols - 1 {
+            top_border.push('┬');
+        } else {
+            top_border.push('┐');
+        }
+    }
+    lines.push(Line::from(Span::styled(top_border, Style::default().fg(ACCENT_DIM))));
+
+    let header = &parsed_rows[0];
+    lines.push(render_table_row_line(header, &col_widths, &align_specs, true));
+
+    let mut sep_border = String::from("├");
+    for (i, w) in col_widths.iter().enumerate() {
+        sep_border.push_str(&"─".repeat(*w + 2));
+        if i < num_cols - 1 {
+            sep_border.push('┼');
+        } else {
+            sep_border.push('┤');
+        }
+    }
+    lines.push(Line::from(Span::styled(sep_border, Style::default().fg(ACCENT_DIM))));
+
+    for row in parsed_rows.iter().skip(1) {
+        lines.push(render_table_row_line(row, &col_widths, &align_specs, false));
+    }
+
+    let mut bot_border = String::from("└");
+    for (i, w) in col_widths.iter().enumerate() {
+        bot_border.push_str(&"─".repeat(*w + 2));
+        if i < num_cols - 1 {
+            bot_border.push('┴');
+        } else {
+            bot_border.push('┘');
+        }
+    }
+    lines.push(Line::from(Span::styled(bot_border, Style::default().fg(ACCENT_DIM))));
+
+    lines
+}
+
+fn parse_table_row(line: &str) -> Vec<String> {
+    let trimmed = line.trim();
+    if trimmed.len() <= 2 {
+        return Vec::new();
+    }
+    let content = &trimmed[1..trimmed.len() - 1];
+    content.split('|').map(|cell| cell.trim().to_string()).collect()
+}
+
+fn render_table_row_line(
+    cells: &[String],
+    widths: &[usize],
+    alignments: &[Alignment],
+    is_header: bool,
+) -> Line<'static> {
+    let mut spans = Vec::new();
+    spans.push(Span::styled("│", Style::default().fg(ACCENT_DIM)));
+
+    let num_cols = widths.len();
+    for i in 0..num_cols {
+        let cell_text = cells.get(i).cloned().unwrap_or_default();
+        let width = widths[i];
+        let align = alignments[i];
+
+        let char_count = cell_text.chars().count();
+        let formatted = if char_count >= width {
+            cell_text.chars().take(width).collect::<String>()
+        } else {
+            let diff = width - char_count;
+            match align {
+                Alignment::Right => {
+                    format!("{}{}", " ".repeat(diff), cell_text)
+                }
+                Alignment::Center => {
+                    let left_pad = diff / 2;
+                    let right_pad = diff - left_pad;
+                    format!("{}{}{}", " ".repeat(left_pad), cell_text, " ".repeat(right_pad))
+                }
+                _ => {
+                    format!("{}{}", cell_text, " ".repeat(diff))
+                }
+            }
+        };
+
+        let style = if is_header {
+            Style::default().fg(ACCENT_LIGHT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT)
+        };
+
+        spans.push(Span::styled(" ", Style::default().fg(TEXT)));
+        spans.push(Span::styled(formatted, style));
+        spans.push(Span::styled(" ", Style::default().fg(TEXT)));
+        spans.push(Span::styled("│", Style::default().fg(ACCENT_DIM)));
+    }
+
+    Line::from(spans)
 }
