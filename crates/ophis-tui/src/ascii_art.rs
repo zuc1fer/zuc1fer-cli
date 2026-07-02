@@ -46,7 +46,7 @@ fn avg_block(x: u32, y: u32, out_w: u32, out_h: u32, src_w: u32, src_h: u32, pix
     }
 }
 
-const BG_THRESHOLD: u16 = 200;
+const BG_THRESHOLD: u16 = 240;
 
 fn is_bg(c: Rgb) -> bool {
     (c.r as u16 + c.g as u16 + c.b as u16) / 3 > BG_THRESHOLD
@@ -109,26 +109,107 @@ fn render_ouroboros(out_w: u32, out_h: u32) -> Vec<Line<'static>> {
 // "ophis" pixel-art bitmap with per-pixel gradient shading
 // ---------------------------------------------------------------------------
 
-/// 6×12 pixel font (lower 6 bits of each byte).
-const FONT_H: usize = 12;
+/// 8×16 pixel font (full byte per row, MSB = leftmost pixel).
+const FONT_H: usize = 16;
 
+#[rustfmt::skip]
+#[rustfmt::skip]
 const O: [u8; FONT_H] = [
-    0x1E, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x1E,
+    0x3C, //   ####
+    0x7E, //  ######
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0x7E, //  ######
+    0x3C, //   ####
 ];
+#[rustfmt::skip]
 const P: [u8; FONT_H] = [
-    0x3F, 0x33, 0x33, 0x33, 0x3F, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+    0xFC, // ######
+    0xFF, // ########
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xFF, // ########
+    0xFC, // ######
+    0xC0, // ##
+    0xC0, // ##
+    0xC0, // ##
+    0xC0, // ##
+    0xC0, // ##
+    0xC0, // ##
+    0xC0, // ##
+    0xC0, // ##
 ];
+#[rustfmt::skip]
 const H: [u8; FONT_H] = [
-    0x33, 0x33, 0x33, 0x33, 0x3F, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33,
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xFF, // ########
+    0xFF, // ########
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
+    0xC3, // ##    ##
 ];
+#[rustfmt::skip]
 const I: [u8; FONT_H] = [
-    0x3F, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x3F,
+    0x7E, //  ######
+    0x7E, //  ######
+    0x18, //    ##
+    0x18, //    ##
+    0x18, //    ##
+    0x18, //    ##
+    0x18, //    ##
+    0x18, //    ##
+    0x18, //    ##
+    0x18, //    ##
+    0x18, //    ##
+    0x18, //    ##
+    0x18, //    ##
+    0x18, //    ##
+    0x7E, //  ######
+    0x7E, //  ######
 ];
+#[rustfmt::skip]
 const S: [u8; FONT_H] = [
-    0x3F, 0x33, 0x30, 0x30, 0x3F, 0x03, 0x03, 0x03, 0x03, 0x03, 0x33, 0x3F,
+    0x3C, //   ####
+    0x7E, //  ######
+    0xC3, // ##    ##
+    0xC0, // ##
+    0xC0, // ##
+    0xC0, // ##
+    0xFC, // ######
+    0xFE, // #######
+    0x7F, //  #######
+    0x3F, //   ######
+    0x03, //        ##
+    0x03, //        ##
+    0x03, //        ##
+    0xC3, // ##    ##
+    0x7E, //  ######
+    0x3C, //   ####
 ];
 
-const CHAR_W: usize = 6;
+const CHAR_W: usize = 8;
 
 struct LetterDef {
     offset: usize,
@@ -136,29 +217,14 @@ struct LetterDef {
 }
 
 const LETTERS: [LetterDef; 5] = [
-    LetterDef {
-        offset: 0,
-        data: &O,
-    },
-    LetterDef {
-        offset: 7,
-        data: &P,
-    },
-    LetterDef {
-        offset: 14,
-        data: &H,
-    },
-    LetterDef {
-        offset: 21,
-        data: &I,
-    },
-    LetterDef {
-        offset: 28,
-        data: &S,
-    },
+    LetterDef { offset: 0, data: &O },
+    LetterDef { offset: 10, data: &P },
+    LetterDef { offset: 20, data: &H },
+    LetterDef { offset: 30, data: &I },
+    LetterDef { offset: 40, data: &S },
 ];
 
-const BITMAP_W: usize = 34;
+const BITMAP_W: usize = 48;
 
 fn build_bitmap() -> Vec<Vec<bool>> {
     let mut bm = vec![vec![false; BITMAP_W]; FONT_H];
@@ -166,7 +232,7 @@ fn build_bitmap() -> Vec<Vec<bool>> {
         for y in 0..FONT_H {
             let row = ld.data[y];
             for x in 0..CHAR_W {
-                if row & (0x20 >> x) != 0 {
+                if row & (0x80 >> x) != 0 {
                     bm[y][ld.offset + x] = true;
                 }
             }
@@ -184,7 +250,8 @@ fn is_edge(bm: &[Vec<bool>], x: usize, y: usize) -> bool {
 
 fn pixel_color(_x: usize, y: usize, edge: bool) -> Rgb {
     let t = y as f64 / (FONT_H - 1) as f64;
-    let bright = (1.0 - t * 0.35) * if edge { 0.70 } else { 1.0 };
+    // Elegant, smooth gradient from primary purple to deeper purple with a very subtle edge factor to prevent blotchy colors
+    let bright = (1.0 - t * 0.25) * if edge { 0.92 } else { 1.0 };
     Rgb {
         r: (160.0 * bright) as u8,
         g: (120.0 * bright) as u8,
@@ -245,32 +312,65 @@ fn render_ophis_art() -> Vec<Line<'static>> {
 // Left column: art + text as pre-styled Lines
 // ---------------------------------------------------------------------------
 
-const LEFT_WIDTH: u16 = 36;
+const LEFT_WIDTH: u16 = 52;
 const TAGLINE: &str = "\u{27B3}  a recursive coding agent  \u{27B3}";
 const HELP: &str = "type a message to begin  \u{00B7}  /help  \u{00B7}  /models";
 
 fn build_left_column() -> Vec<Line<'static>> {
-    let mut col: Vec<Line<'static>> = Vec::with_capacity(20);
+    let mut col: Vec<Line<'static>> = Vec::with_capacity(28);
 
     let accent_st = Style::default().fg(theme::ACCENT);
+    let accent_light_st = Style::default().fg(theme::ACCENT_LIGHT);
     let dim_st = Style::default().fg(theme::TEXT_DIM);
     let accent_dim_st = Style::default().fg(theme::ACCENT_DIM);
 
+    // ── OPHIS pixel art (8 rendered rows) ──
     col.extend(render_ophis_art());
     col.push(Line::from(""));
+
+    // ── Tagline ──
     col.push(Line::from(Span::styled(TAGLINE.to_string(), accent_st)));
     col.push(Line::from(""));
 
+    // ── Description ──
     col.push(Line::from(Span::styled(
-        "an AI-native coding companion for your terminal.",
+        "an AI-native coding companion for your",
         dim_st,
     )));
     col.push(Line::from(Span::styled(
-        "works with any model, on any codebase.",
+        "terminal. works with any model, on any",
         dim_st,
     )));
-
+    col.push(Line::from(Span::styled(
+        "codebase. fast, focused, no friction.",
+        dim_st,
+    )));
     col.push(Line::from(""));
+
+    // ── Feature highlights ──
+    col.push(Line::from(vec![
+        Span::styled("\u{25C6} ", accent_light_st),
+        Span::styled("multi-model   ", accent_st),
+        Span::styled("deepseek \u{00B7} claude \u{00B7} gpt \u{00B7} ollama", dim_st),
+    ]));
+    col.push(Line::from(vec![
+        Span::styled("\u{25C6} ", accent_light_st),
+        Span::styled("smart tools   ", accent_st),
+        Span::styled("bash \u{00B7} edit \u{00B7} grep \u{00B7} git \u{00B7} web", dim_st),
+    ]));
+    col.push(Line::from(vec![
+        Span::styled("\u{25C6} ", accent_light_st),
+        Span::styled("code intel    ", accent_st),
+        Span::styled("ast-grep \u{00B7} lsp \u{00B7} semantic search", dim_st),
+    ]));
+    col.push(Line::from(vec![
+        Span::styled("\u{25C6} ", accent_light_st),
+        Span::styled("extensible    ", accent_st),
+        Span::styled("mcp servers \u{00B7} plugin ecosystem", dim_st),
+    ]));
+    col.push(Line::from(""));
+
+    // ── Author / links ──
     col.push(Line::from(Span::styled("crafted by zuc1fer", dim_st)));
     col.push(Line::from(Span::styled(
         "zuc1fer.business@gmail.com",
@@ -316,24 +416,35 @@ pub fn splash_display(term_width: u16, term_height: u16) -> Vec<Line<'static>> {
 
     let img_col_w: u32 = (term_width as u32).saturating_sub(LEFT_WIDTH as u32 + 4);
 
-    if img_col_w < 24 || term_width < 54 {
+    // Narrow terminal fallback — left column only, horizontally centered.
+    if img_col_w < 24 || term_width < 80 {
+        let content_w = LEFT_WIDTH;
+        let h_margin = (term_width.saturating_sub(content_w)) / 2;
+        let margin_str: String = " ".repeat(h_margin as usize);
         let mut out: Vec<Line<'static>> = Vec::with_capacity(left_count);
         for line in &left {
-            out.push(line_padded_to(line, LEFT_WIDTH));
+            let padded = line_padded_to(line, content_w);
+            let mut spans = vec![Span::raw(margin_str.clone())];
+            spans.extend(padded.spans);
+            out.push(Line::from(spans));
         }
         return out;
     }
 
-    let char_adj = 0.50;
-    let max_h = (term_height as u32).saturating_sub(5).max(2);
+    // Terminal chars are ~2× taller than wide; char_adj compensates.
+    let char_adj = 0.45;
+    let max_h = (term_height as u32).saturating_sub(4).max(2);
     let max_w = img_col_w;
     let (src_w, src_h, _) = get_source();
     let src_ratio = src_w as f64 / src_h as f64;
 
+    // Size the image to fill the available space while preserving aspect ratio.
     let w_from_h = (max_h as f64 / char_adj * src_ratio) as u32;
-    let (out_w, out_h) = if w_from_h >= max_w.min(40) {
-        (w_from_h.min(max_w).max(20), max_h)
+    let (out_w, out_h) = if w_from_h <= max_w {
+        // Height is the constraint — use full height.
+        (w_from_h.max(20), max_h)
     } else {
+        // Width is the constraint — fit to width.
         let h_from_w = (max_w as f64 * char_adj / src_ratio).max(1.0) as u32;
         (max_w, h_from_w.min(max_h).max(2))
     };
@@ -342,25 +453,59 @@ pub fn splash_display(term_width: u16, term_height: u16) -> Vec<Line<'static>> {
     let right_count = right.len();
 
     let total_rows = left_count.max(right_count);
-    let right_pad_top = (left_count as u16).saturating_sub(right_count as u16) / 2;
+
+    // Vertically center BOTH columns against the taller side.
+    let left_pad_top = if right_count > left_count {
+        (right_count - left_count) / 2
+    } else {
+        0
+    };
+    let right_pad_top = if left_count > right_count {
+        (left_count - right_count) / 2
+    } else {
+        0
+    };
+
+    // Uniform combined width so every line is the same length.
+    let spacer: u16 = 6;
+    let combined_w = LEFT_WIDTH + spacer + out_w as u16;
+
+    // Horizontal margin to center the whole block in the terminal.
+    let h_margin = (term_width.saturating_sub(combined_w)) / 2;
+    let margin_str: String = " ".repeat(h_margin as usize);
 
     let mut result: Vec<Line<'static>> = Vec::with_capacity(total_rows);
 
     for i in 0..total_rows {
         let mut spans: Vec<Span<'static>> = Vec::new();
 
-        if i < left_count {
-            let line = line_padded_to(&left[i], LEFT_WIDTH);
+        // Horizontal centering margin.
+        spans.push(Span::raw(margin_str.clone()));
+
+        // Left column (vertically centered).
+        let left_i = if i >= left_pad_top { i - left_pad_top } else { usize::MAX };
+        if left_i < left_count {
+            let line = line_padded_to(&left[left_i], LEFT_WIDTH);
             spans.extend(line.spans);
         } else {
             spans.push(Span::raw(" ".repeat(LEFT_WIDTH as usize)));
         }
 
-        spans.push(Span::raw("  "));
+        // Spacer between columns.
+        spans.push(Span::raw(" ".repeat(spacer as usize)));
 
-        let img_i = (i as u16).wrapping_sub(right_pad_top) as usize;
+        // Right column / ouroboros image (vertically centered).
+        let img_i = if i >= right_pad_top { i - right_pad_top } else { usize::MAX };
         if img_i < right_count {
-            spans.extend(right[img_i].spans.clone());
+            let img_line = &right[img_i];
+            spans.extend(img_line.spans.clone());
+            // Pad image line to out_w so all rows are uniform width.
+            let img_line_w: u16 = img_line.spans.iter().map(|s| s.width() as u16).sum();
+            if img_line_w < out_w as u16 {
+                spans.push(Span::raw(" ".repeat((out_w as u16 - img_line_w) as usize)));
+            }
+        } else {
+            spans.push(Span::raw(" ".repeat(out_w as usize)));
         }
 
         result.push(Line::from(spans));

@@ -1231,7 +1231,7 @@ fn draw_splash(frame: &mut Frame, area: Rect) {
         content.push(Line::from(""));
     }
     content.extend(art);
-    frame.render_widget(Paragraph::new(content).alignment(Alignment::Center), area);
+    frame.render_widget(Paragraph::new(content).alignment(Alignment::Left), area);
 }
 
 fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
