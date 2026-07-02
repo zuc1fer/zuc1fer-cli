@@ -77,6 +77,7 @@ pub struct App {
     total_lines: Cell<usize>,
     view_height: Cell<usize>,
     pub msg_area: Cell<Rect>,
+    pub input_area: Cell<Rect>,
 }
 
 pub struct Message {
@@ -162,6 +163,7 @@ impl App {
             sidebar_area: Cell::new(Rect::default()),
             frame_area: Cell::new(Rect::default()),
             repo_scroll: Cell::new(0),
+            input_area: Cell::new(Rect::default()),
         }
     }
 
@@ -335,9 +337,32 @@ impl App {
         // 5. Sidebar Tabs
         if self.show_repo_panel {
             let sb_area = self.sidebar_area.get();
-            let tab_y_offset = if sb_area.height >= 20 { 8 } else { 0 };
-            if click_y >= sb_area.y + tab_y_offset && click_y < sb_area.y + tab_y_offset + 2 {
-                let click_rel_x = click_x.saturating_sub(sb_area.x) as usize;
+            let tab_area = if sb_area.height >= 20 {
+                let sidebar_layout = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(8), // logo
+                        Constraint::Length(2), // tabs
+                        Constraint::Min(0),    // content
+                    ])
+                    .split(sb_area);
+                sidebar_layout[1]
+            } else {
+                let sidebar_layout = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(2), // tabs
+                        Constraint::Min(0),    // content
+                    ])
+                    .split(sb_area);
+                sidebar_layout[0]
+            };
+
+            if click_x >= tab_area.x && click_x < tab_area.x + tab_area.width
+                && click_y >= tab_area.y && click_y < tab_area.y + tab_area.height
+            {
+                // Subtract 1 to account for Block left border offset
+                let click_rel_x = click_x.saturating_sub(tab_area.x + 1) as usize;
                 if click_rel_x < 10 {
                     self.sidebar_tab = 0;
                 } else if click_rel_x < 20 {
@@ -375,6 +400,17 @@ impl App {
                     }
                 }
             }
+            return None;
+        }
+
+        // 7. Input Box Click (Jump text cursor position)
+        let in_area = self.input_area.get();
+        if click_x >= in_area.x && click_x < in_area.x + in_area.width
+            && click_y >= in_area.y + 1 && click_y < in_area.y + in_area.height
+        {
+            let col = click_x.saturating_sub(in_area.x + 1) as usize;
+            self.input.move_cursor(tui_textarea::CursorMove::Jump(0, col as u16));
+            return None;
         }
 
         None
@@ -726,7 +762,32 @@ impl App {
         None
     }
 
-    pub fn handle_mouse_scroll(&self, mouse_x: u16, mouse_y: u16, direction: i16) {
+    pub fn handle_mouse_scroll(&mut self, mouse_x: u16, mouse_y: u16, direction: i16) {
+        if self.show_model_picker {
+            if direction > 0 {
+                self.model_picker_selection += 1;
+            } else {
+                self.model_picker_selection = self.model_picker_selection.saturating_sub(1);
+            }
+            return;
+        }
+        if self.show_session_picker {
+            if direction > 0 {
+                self.session_picker_selection += 1;
+            } else {
+                self.session_picker_selection = self.session_picker_selection.saturating_sub(1);
+            }
+            return;
+        }
+        if self.palette_open {
+            if direction > 0 {
+                self.palette_selection += 1;
+            } else {
+                self.palette_selection = self.palette_selection.saturating_sub(1);
+            }
+            return;
+        }
+
         let sb_area = self.sidebar_area.get();
         if self.show_repo_panel
             && mouse_x >= sb_area.x
@@ -1820,6 +1881,7 @@ fn wrap_line(line: &str, width: usize, result: &mut Vec<String>) {
 }
 
 fn draw_input(frame: &mut Frame, area: Rect, app: &App) {
+    app.input_area.set(area);
     let (text_color, border_color) = if app.streaming {
         (ACCENT_DIM, ACCENT_DIM)
     } else {
