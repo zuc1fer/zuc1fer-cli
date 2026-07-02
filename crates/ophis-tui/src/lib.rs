@@ -122,8 +122,8 @@ impl App {
             running: true,
             streaming: false,
             repo_files: Vec::new(),
-            show_repo_panel: false,
-            sidebar_tab: 0,
+            show_repo_panel: true,
+            sidebar_tab: 1,
             mcp_servers: Vec::new(),
             cost_usd: 0.0,
             palette_open: false,
@@ -550,9 +550,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if app.messages.is_empty() && !app.streaming {
         app.view_height.set(body.height as usize);
         draw_splash(frame, body);
-    } else if app.show_repo_panel && body.width > 44 {
+    } else if app.show_repo_panel && body.width > 70 {
         let h_chunks =
-            Layout::horizontal([Constraint::Min(20), Constraint::Length(34)]).split(body);
+            Layout::horizontal([Constraint::Min(20), Constraint::Length(48)]).split(body);
 
         app.view_height.set(h_chunks[0].height as usize);
         draw_messages(frame, h_chunks[0], app);
@@ -953,14 +953,49 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App) {
         .highlight_style(accent_bold())
         .divider(Span::styled("·", Style::default().fg(ACCENT_DIM)));
 
-    let tab_rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Min(0)])
-        .split(area);
+    // Responsively show small Ouroboros logo at the top of the sidebar if there's enough height
+    let (logo_area, tab_area, content_area) = if area.height >= 20 {
+        let sidebar_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(8), // Small ouroboros logo
+                Constraint::Length(2), // Tabs selection widget
+                Constraint::Min(0),    // Active tab content area
+            ])
+            .split(area);
+        (Some(sidebar_layout[0]), sidebar_layout[1], sidebar_layout[2])
+    } else {
+        let sidebar_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(2), // Tabs selection widget
+                Constraint::Min(0),    // Active tab content area
+            ])
+            .split(area);
+        (None, sidebar_layout[0], sidebar_layout[1])
+    };
 
-    frame.render_widget(tabs, tab_rows[0]);
+    if let Some(logo_rect) = logo_area {
+        let logo_height = 8;
+        let logo_width = 16;
+        let logo_lines = ascii_art::render_ouroboros(logo_width, logo_height);
+        
+        let padding_left = (logo_rect.width.saturating_sub(logo_width as u16)) / 2;
+        let padding_str = " ".repeat(padding_left as usize);
+        let centered_logo: Vec<Line> = logo_lines
+            .into_iter()
+            .map(|line| {
+                let mut spans = vec![Span::raw(padding_str.clone())];
+                spans.extend(line.spans);
+                Line::from(spans)
+            })
+            .collect();
+            
+        frame.render_widget(Paragraph::new(centered_logo).block(panel_block()), logo_rect);
+    }
 
-    let content_area = tab_rows[1];
+    frame.render_widget(tabs, tab_area);
+
     match app.sidebar_tab {
         0 => draw_repo_tab(frame, content_area, app),
         1 => draw_session_tab(frame, content_area, app),

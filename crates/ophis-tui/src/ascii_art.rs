@@ -56,7 +56,7 @@ fn is_bg(c: Rgb) -> bool {
 // Ouroboros rendering – original size logic
 // ---------------------------------------------------------------------------
 
-fn render_ouroboros(out_w: u32, out_h: u32) -> Vec<Line<'static>> {
+pub fn render_ouroboros(out_w: u32, out_h: u32) -> Vec<Line<'static>> {
     let (src_w, src_h, pixels) = get_source();
     let out_scanlines = out_h * 2;
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(out_h as usize);
