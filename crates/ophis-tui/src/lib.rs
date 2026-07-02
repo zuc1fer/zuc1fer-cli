@@ -2082,15 +2082,36 @@ fn render_markdown_table(raw_lines: &[String], max_width: usize) -> Vec<Line<'st
     let padding_per_col = 2;
     let borders_width = num_cols + 1;
     let total_padding_and_borders = num_cols * padding_per_col + borders_width;
+    let total_available = max_width.saturating_sub(total_padding_and_borders);
     let sum_widths: usize = col_widths.iter().sum();
 
-    if sum_widths + total_padding_and_borders > max_width {
-        let budget = max_width.saturating_sub(total_padding_and_borders);
-        if budget > 0 {
+    if sum_widths > total_available && total_available > 0 {
+        let mut remaining_budget = total_available;
+        let mut dynamic_cols = Vec::new();
+        for i in 0..num_cols {
+            if col_widths[i] <= 16 {
+                remaining_budget = remaining_budget.saturating_sub(col_widths[i]);
+            } else {
+                dynamic_cols.push(i);
+            }
+        }
+
+        if !dynamic_cols.is_empty() {
+            let sum_dynamic: usize = dynamic_cols.iter().map(|&idx| col_widths[idx]).sum();
+            let num_dynamic = dynamic_cols.len();
+            for &idx in &dynamic_cols {
+                let portion = if sum_dynamic > 0 {
+                    ((col_widths[idx] as f64 / sum_dynamic as f64) * remaining_budget as f64) as usize
+                } else {
+                    remaining_budget / num_dynamic
+                };
+                col_widths[idx] = portion.max(12);
+            }
+        } else {
             for w in &mut col_widths {
-                *w = ((*w as f64 / sum_widths as f64) * budget as f64) as usize;
-                if *w < 3 {
-                    *w = 3;
+                *w = ((*w as f64 / sum_widths as f64) * total_available as f64) as usize;
+                if *w < 4 {
+                    *w = 4;
                 }
             }
         }
@@ -2110,7 +2131,7 @@ fn render_markdown_table(raw_lines: &[String], max_width: usize) -> Vec<Line<'st
     lines.push(Line::from(Span::styled(top_border, Style::default().fg(ACCENT_DIM))));
 
     let header = &parsed_rows[0];
-    lines.push(render_table_row_line(header, &col_widths, &align_specs, true));
+    lines.extend(render_table_row_lines(header, &col_widths, &align_specs, true));
 
     let mut sep_border = String::from("├");
     for (i, w) in col_widths.iter().enumerate() {
@@ -2124,7 +2145,7 @@ fn render_markdown_table(raw_lines: &[String], max_width: usize) -> Vec<Line<'st
     lines.push(Line::from(Span::styled(sep_border, Style::default().fg(ACCENT_DIM))));
 
     for row in parsed_rows.iter().skip(1) {
-        lines.push(render_table_row_line(row, &col_widths, &align_specs, false));
+        lines.extend(render_table_row_lines(row, &col_widths, &align_specs, false));
     }
 
     let mut bot_border = String::from("└");
@@ -2150,52 +2171,68 @@ fn parse_table_row(line: &str) -> Vec<String> {
     content.split('|').map(|cell| cell.trim().to_string()).collect()
 }
 
-fn render_table_row_line(
+fn render_table_row_lines(
     cells: &[String],
     widths: &[usize],
     alignments: &[Alignment],
     is_header: bool,
-) -> Line<'static> {
-    let mut spans = Vec::new();
-    spans.push(Span::styled("│", Style::default().fg(ACCENT_DIM)));
-
+) -> Vec<Line<'static>> {
     let num_cols = widths.len();
+
+    let mut cell_lines: Vec<Vec<String>> = Vec::new();
+    let mut max_lines = 1;
     for i in 0..num_cols {
         let cell_text = cells.get(i).cloned().unwrap_or_default();
-        let width = widths[i];
-        let align = alignments[i];
-
-        let char_count = cell_text.chars().count();
-        let formatted = if char_count >= width {
-            cell_text.chars().take(width).collect::<String>()
-        } else {
-            let diff = width - char_count;
-            match align {
-                Alignment::Right => {
-                    format!("{}{}", " ".repeat(diff), cell_text)
-                }
-                Alignment::Center => {
-                    let left_pad = diff / 2;
-                    let right_pad = diff - left_pad;
-                    format!("{}{}{}", " ".repeat(left_pad), cell_text, " ".repeat(right_pad))
-                }
-                _ => {
-                    format!("{}{}", cell_text, " ".repeat(diff))
-                }
-            }
-        };
-
-        let style = if is_header {
-            Style::default().fg(ACCENT_LIGHT).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(TEXT)
-        };
-
-        spans.push(Span::styled(" ", Style::default().fg(TEXT)));
-        spans.extend(render_inline_markdown(&formatted, style));
-        spans.push(Span::styled(" ", Style::default().fg(TEXT)));
-        spans.push(Span::styled("│", Style::default().fg(ACCENT_DIM)));
+        let w = widths[i];
+        let wrapped = wrap_text(&cell_text, w);
+        max_lines = max_lines.max(wrapped.len());
+        cell_lines.push(wrapped);
     }
 
-    Line::from(spans)
+    let mut lines = Vec::new();
+
+    for line_idx in 0..max_lines {
+        let mut spans = Vec::new();
+        spans.push(Span::styled("│", Style::default().fg(ACCENT_DIM)));
+
+        for i in 0..num_cols {
+            let width = widths[i];
+            let align = alignments[i];
+            let cell_line_text = cell_lines[i].get(line_idx).cloned().unwrap_or_default();
+
+            let char_count = cell_line_text.chars().count();
+            let formatted = if char_count >= width {
+                cell_line_text.chars().take(width).collect::<String>()
+            } else {
+                let diff = width - char_count;
+                match align {
+                    Alignment::Right => {
+                        format!("{}{}", " ".repeat(diff), cell_line_text)
+                    }
+                    Alignment::Center => {
+                        let left_pad = diff / 2;
+                        let right_pad = diff - left_pad;
+                        format!("{}{}{}", " ".repeat(left_pad), cell_line_text, " ".repeat(right_pad))
+                    }
+                    _ => {
+                        format!("{}{}", cell_line_text, " ".repeat(diff))
+                    }
+                }
+            };
+
+            let style = if is_header {
+                Style::default().fg(ACCENT_LIGHT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(TEXT)
+            };
+
+            spans.push(Span::styled(" ", Style::default().fg(TEXT)));
+            spans.extend(render_inline_markdown(&formatted, style));
+            spans.push(Span::styled(" ", Style::default().fg(TEXT)));
+            spans.push(Span::styled("│", Style::default().fg(ACCENT_DIM)));
+        }
+        lines.push(Line::from(spans));
+    }
+
+    lines
 }
