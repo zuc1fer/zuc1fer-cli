@@ -43,6 +43,8 @@ pub struct App {
     pub model: String,
     pub tokens_in: u64,
     pub tokens_out: u64,
+    pub active_ctx_in: u64,
+    pub active_ctx_out: u64,
     pub context_max_tokens: u64,
     pub running: bool,
     pub streaming: bool,
@@ -118,6 +120,8 @@ impl App {
             model: model.to_string(),
             tokens_in: 0,
             tokens_out: 0,
+            active_ctx_in: 0,
+            active_ctx_out: 0,
             context_max_tokens: model_context_limit(model),
             running: true,
             streaming: false,
@@ -662,14 +666,14 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
         header_rows[0],
     );
 
-    let total_tokens = app.tokens_in + app.tokens_out;
+    let active_tokens = app.active_ctx_in + app.active_ctx_out;
     let ratio = if app.context_max_tokens > 0 {
-        ((total_tokens as f64 / app.context_max_tokens as f64) * 100.0).min(100.0) as u16
+        ((active_tokens as f64 / app.context_max_tokens as f64) * 100.0).min(100.0) as u16
     } else {
         0
     };
     let fill = if ratio > 85 { ERROR } else { ACCENT };
-    let gauge_label = format!(" {total_tokens} / {} ctx ", app.context_max_tokens);
+    let gauge_label = format!(" {active_tokens} / {} ctx ", app.context_max_tokens);
     let gauge = Gauge::default()
         .gauge_style(Style::default().fg(fill).bg(SURFACE_LIGHT))
         .percent(ratio)
@@ -1138,8 +1142,9 @@ fn render_tree(lines: &mut Vec<Line>, nodes: &[FileTreeNode], prefix: &str) {
 
 fn draw_session_tab(frame: &mut Frame, area: Rect, app: &App) {
     let total = app.tokens_in + app.tokens_out;
-    let context_pct = if app.context_max_tokens > 0 {
-        (total as f64 / app.context_max_tokens as f64) * 100.0
+    let active_total = app.active_ctx_in + app.active_ctx_out;
+    let active_pct = if app.context_max_tokens > 0 {
+        (active_total as f64 / app.context_max_tokens as f64) * 100.0
     } else {
         0.0
     };
@@ -1161,7 +1166,11 @@ fn draw_session_tab(frame: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(TEXT_DIM),
         )]),
         Line::from(vec![Span::styled(
-            format!(" Total:      {} ({:.0}%)", total, context_pct),
+            format!(" Total:      {}", total),
+            Style::default().fg(TEXT),
+        )]),
+        Line::from(vec![Span::styled(
+            format!(" Active Ctx: {} ({:.0}%)", active_total, active_pct),
             Style::default().fg(TEXT),
         )]),
         Line::from(""),
@@ -1621,27 +1630,30 @@ fn model_pricing(model: &str) -> (f64, f64) {
             }
         }
         "openrouter" => (0.50, 1.50),
+        "opencode" => (0.0, 0.0),
         "ollama" => (0.0, 0.0),
         _ => (1.0, 5.0),
     }
 }
 
 fn model_context_limit(model: &str) -> u64 {
-    let provider = model.split('/').next().unwrap_or("");
     let model_lower = model.to_lowercase();
-    match provider {
-        "deepseek" => 1_048_576,
-        "anthropic" => 200_000,
-        "openai" => {
-            if model_lower.contains("gpt-4.1") {
-                1_047_576
-            } else {
-                128_000
-            }
-        }
-        "openrouter" => 131_072,
-        "ollama" => 8_192,
-        _ => 128_000,
+    if model_lower.contains("gemini") {
+        1_048_576
+    } else if model_lower.contains("gpt-4.1") {
+        1_047_576
+    } else if model_lower.contains("deepseek") || model_lower.contains("v4") {
+        1_048_576
+    } else if model_lower.contains("claude")
+        || model_lower.contains("sonnet")
+        || model_lower.contains("opus")
+        || model_lower.contains("haiku")
+    {
+        200_000
+    } else if model_lower.contains("ollama") {
+        8_192
+    } else {
+        128_000
     }
 }
 
