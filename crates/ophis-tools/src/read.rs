@@ -22,7 +22,7 @@ impl Tool for ReadTool {
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Maximum number of lines to read (default 2000)"
+                        "description": "Maximum number of lines to read (default 500)"
                     }
                 },
                 "required": ["filePath"]
@@ -81,7 +81,7 @@ impl ReadTool {
         let lines: Vec<&str> = content.lines().collect();
 
         let offset = call.arguments["offset"].as_u64().unwrap_or(1).max(1) as usize;
-        let limit = call.arguments["limit"].as_u64().unwrap_or(2000).max(1) as usize;
+        let limit = call.arguments["limit"].as_u64().unwrap_or(500).max(1) as usize;
 
         let start = (offset - 1).min(lines.len());
         let end = (start + limit).min(lines.len());
