@@ -246,6 +246,8 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                 AgentEvent::Tokens { input, output, .. } => {
                     app.tokens_in += input;
                     app.tokens_out += output;
+                    app.active_ctx_in = input;
+                    app.active_ctx_out = output;
                     app.update_cost();
                 }
                 AgentEvent::ToolCallInfo { .. } => {}
