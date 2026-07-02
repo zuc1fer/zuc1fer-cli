@@ -56,7 +56,9 @@ pub struct App {
     pub palette_open: bool,
     pub palette_query: String,
     pub palette_selection: usize,
-    pub repo_scroll: usize,
+    pub repo_scroll: Cell<usize>,
+    pub sidebar_area: Cell<Rect>,
+    pub frame_area: Cell<Rect>,
     pub available_models: Vec<String>,
     pub show_model_picker: bool,
     pub model_picker_query: String,
@@ -139,7 +141,6 @@ impl App {
             palette_open: false,
             palette_query: String::new(),
             palette_selection: 0,
-            repo_scroll: 0,
             available_models: Vec::new(),
             show_model_picker: false,
             model_picker_query: String::new(),
@@ -158,6 +159,9 @@ impl App {
             total_lines: Cell::new(0),
             view_height: Cell::new(24),
             msg_area: Cell::new(Rect::default()),
+            sidebar_area: Cell::new(Rect::default()),
+            frame_area: Cell::new(Rect::default()),
+            repo_scroll: Cell::new(0),
         }
     }
 
@@ -203,7 +207,151 @@ impl App {
         });
     }
 
-    pub fn handle_mouse_click(&mut self, click_x: u16, click_y: u16) {
+    pub fn handle_mouse_click(&mut self, click_x: u16, click_y: u16) -> Option<String> {
+        let frame_rect = self.frame_area.get();
+
+        // 1. Approval Modal
+        if self.pending_approval.is_some() {
+            let area = centered_rect(60, 34, frame_rect);
+            let block = modal_block("Approval required");
+            let inner = block.inner(area);
+            if click_y == inner.y + 6 {
+                if click_x >= inner.x + 2 && click_x < inner.x + 14 {
+                    return Some("__APPROVE__".to_string());
+                } else if click_x >= inner.x + 14 && click_x < inner.x + 24 {
+                    return Some("__DENY__".to_string());
+                } else if click_x >= inner.x + 24 && click_x < inner.x + 48 {
+                    return Some("__APPROVE_ALL__".to_string());
+                }
+            }
+            return None;
+        }
+
+        // 2. Model Picker Modal
+        if self.show_model_picker {
+            let area = centered_rect(60, 60, frame_rect);
+            if click_x >= area.x && click_x < area.x + area.width
+                && click_y >= area.y && click_y < area.y + area.height
+            {
+                let block = modal_block(&format!("Switch Model · {}", self.available_models.len()));
+                let inner = block.inner(area);
+                let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(inner);
+                let list_area = chunks[1];
+                if click_x >= list_area.x && click_x < list_area.x + list_area.width
+                    && click_y >= list_area.y && click_y < list_area.y + list_area.height
+                {
+                    let relative_row = (click_y - list_area.y) as usize;
+                    let filtered = filtered_models(&self.available_models, &self.model_picker_query);
+                    if relative_row < filtered.len() {
+                        let chosen = (*filtered[relative_row]).clone();
+                        self.show_model_picker = false;
+                        self.model_picker_query.clear();
+                        self.model_picker_selection = 0;
+                        return Some(format!("__MODEL_SELECT__:{}", chosen));
+                    }
+                }
+            } else {
+                // Clicked away
+                self.show_model_picker = false;
+                self.model_picker_query.clear();
+                self.model_picker_selection = 0;
+            }
+            return None;
+        }
+
+        // 3. Session Picker Modal
+        if self.show_session_picker {
+            let area = centered_rect(70, 60, frame_rect);
+            if click_x >= area.x && click_x < area.x + area.width
+                && click_y >= area.y && click_y < area.y + area.height
+            {
+                let block = modal_block(&format!("Sessions · {}", self.sessions.len()));
+                let inner = block.inner(area);
+                let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(inner);
+                let list_area = chunks[1];
+                if click_x >= list_area.x && click_x < list_area.x + list_area.width
+                    && click_y >= list_area.y && click_y < list_area.y + list_area.height
+                {
+                    let relative_row = (click_y - list_area.y) as usize;
+                    if relative_row < self.sessions.len() {
+                        let chosen = self.sessions[relative_row].id.clone();
+                        self.show_session_picker = false;
+                        self.session_picker_selection = 0;
+                        return Some(format!("__SESSION_SELECT__:{}", chosen));
+                    }
+                }
+            } else {
+                // Clicked away
+                self.show_session_picker = false;
+                self.session_picker_selection = 0;
+            }
+            return None;
+        }
+
+        // 4. Command Palette Modal
+        if self.palette_open {
+            let area = centered_rect(60, 50, frame_rect);
+            if click_x >= area.x && click_x < area.x + area.width
+                && click_y >= area.y && click_y < area.y + area.height
+            {
+                let block = modal_block("Command Palette");
+                let inner = block.inner(area);
+                let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(inner);
+                let list_area = chunks[1];
+                if click_x >= list_area.x && click_x < list_area.x + list_area.width
+                    && click_y >= list_area.y && click_y < list_area.y + list_area.height
+                {
+                    let relative_row = (click_y - list_area.y) as usize;
+                    let commands = palette_commands();
+                    let filtered: Vec<(&str, &str)> = if self.palette_query.is_empty() {
+                        commands.to_vec()
+                    } else {
+                        let q = self.palette_query.to_lowercase();
+                        commands
+                            .iter()
+                            .filter(|(cmd, desc)| {
+                                cmd.to_lowercase().contains(&q) || desc.to_lowercase().contains(&q)
+                            })
+                            .copied()
+                            .collect()
+                    };
+                    if relative_row < filtered.len() {
+                        let cmd = filtered[relative_row].0.to_string();
+                        self.palette_open = false;
+                        self.palette_query.clear();
+                        self.palette_selection = 0;
+                        return Some(cmd);
+                    }
+                }
+            } else {
+                // Clicked away
+                self.palette_open = false;
+                self.palette_query.clear();
+                self.palette_selection = 0;
+            }
+            return None;
+        }
+
+        // 5. Sidebar Tabs
+        if self.show_repo_panel {
+            let sb_area = self.sidebar_area.get();
+            let tab_y_offset = if sb_area.height >= 20 { 8 } else { 0 };
+            if click_y >= sb_area.y + tab_y_offset && click_y < sb_area.y + tab_y_offset + 2 {
+                let click_rel_x = click_x.saturating_sub(sb_area.x) as usize;
+                if click_rel_x < 10 {
+                    self.sidebar_tab = 0;
+                } else if click_rel_x < 20 {
+                    self.sidebar_tab = 1;
+                } else if click_rel_x < 27 {
+                    self.sidebar_tab = 2;
+                } else if click_rel_x < 35 {
+                    self.sidebar_tab = 3;
+                }
+                return None;
+            }
+        }
+
+        // 6. Message collapsible logs clicks
         let area = self.msg_area.get();
         if click_x >= area.x && click_x < area.x + area.width
             && click_y >= area.y && click_y < area.y + area.height
@@ -217,8 +365,6 @@ impl App {
 
             if clicked_line_idx < line_to_msg_idx.len() {
                 let msg_idx = line_to_msg_idx[clicked_line_idx];
-                
-                // Only toggle if it's the header (the first line of the message block)
                 let is_header = clicked_line_idx == 0 || line_to_msg_idx[clicked_line_idx - 1] != msg_idx;
                 
                 if is_header {
@@ -230,6 +376,8 @@ impl App {
                 }
             }
         }
+
+        None
     }
 
     pub fn start_streaming(&mut self) {
@@ -519,7 +667,7 @@ impl App {
             }
             KeyCode::PageUp => {
                 if self.show_repo_panel && self.sidebar_tab == 0 {
-                    self.repo_scroll = self.repo_scroll.saturating_sub(10);
+                    self.repo_scroll.set(self.repo_scroll.get().saturating_sub(10));
                 } else {
                     let page = self.view_height.get().saturating_sub(2);
                     self.scroll_offset
@@ -529,7 +677,7 @@ impl App {
             }
             KeyCode::PageDown => {
                 if self.show_repo_panel && self.sidebar_tab == 0 {
-                    self.repo_scroll += 10;
+                    self.repo_scroll.set(self.repo_scroll.get() + 10);
                 } else {
                     let page = self.view_height.get().saturating_sub(2);
                     let max = self.max_scroll();
@@ -546,7 +694,7 @@ impl App {
             }
             KeyCode::Up => {
                 if self.show_repo_panel && self.sidebar_tab == 0 {
-                    self.repo_scroll = self.repo_scroll.saturating_sub(1);
+                    self.repo_scroll.set(self.repo_scroll.get().saturating_sub(1));
                 } else if self.input.lines().len() <= 1 && self.input.cursor().1 == 0 {
                     self.navigate_history_back();
                 } else {
@@ -557,7 +705,7 @@ impl App {
             }
             KeyCode::Down => {
                 if self.show_repo_panel && self.sidebar_tab == 0 {
-                    self.repo_scroll += 1;
+                    self.repo_scroll.set(self.repo_scroll.get() + 1);
                 } else if self.history_index.is_some() {
                     self.navigate_history_forward();
                 } else {
@@ -578,24 +726,41 @@ impl App {
         None
     }
 
-    pub fn handle_mouse_scroll(&self, direction: i16) {
-        if direction > 0 {
-            let max = self.max_scroll();
-            let new = (self.scroll_offset.get() + 3).min(max);
-            self.scroll_offset.set(new);
-            if new >= max {
-                self.auto_scroll.set(true);
+    pub fn handle_mouse_scroll(&self, mouse_x: u16, mouse_y: u16, direction: i16) {
+        let sb_area = self.sidebar_area.get();
+        if self.show_repo_panel
+            && mouse_x >= sb_area.x
+            && mouse_x < sb_area.x + sb_area.width
+            && mouse_y >= sb_area.y
+            && mouse_y < sb_area.y + sb_area.height
+        {
+            if self.sidebar_tab == 0 {
+                if direction > 0 {
+                    self.repo_scroll.set(self.repo_scroll.get() + 3);
+                } else {
+                    self.repo_scroll.set(self.repo_scroll.get().saturating_sub(3));
+                }
             }
         } else {
-            self.scroll_offset
-                .set(self.scroll_offset.get().saturating_sub(3));
-            self.auto_scroll.set(false);
+            if direction > 0 {
+                let max = self.max_scroll();
+                let new = (self.scroll_offset.get() + 3).min(max);
+                self.scroll_offset.set(new);
+                if new >= max {
+                    self.auto_scroll.set(true);
+                }
+            } else {
+                self.scroll_offset
+                    .set(self.scroll_offset.get().saturating_sub(3));
+                self.auto_scroll.set(false);
+            }
         }
     }
 }
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
+    app.frame_area.set(area);
 
     let chunks = Layout::vertical([
         Constraint::Length(2),
@@ -1002,6 +1167,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 }
 
 fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App) {
+    app.sidebar_area.set(area);
     let tab_titles = vec![" RepoMap ", " Session ", " MCPs ", " Todos "];
     let tabs = Tabs::new(tab_titles)
         .block(
@@ -1082,7 +1248,7 @@ fn draw_repo_tab(frame: &mut Frame, area: Rect, app: &App) {
         render_tree(&mut lines, &tree, "");
     }
     let total = lines.len();
-    let scroll = app.repo_scroll.min(total.saturating_sub(max_lines.max(1)));
+    let scroll = app.repo_scroll.get().min(total.saturating_sub(max_lines.max(1)));
     let visible: Vec<Line> = lines.into_iter().skip(scroll).take(max_lines).collect();
 
     frame.render_widget(Paragraph::new(visible).block(panel_block()), area);
