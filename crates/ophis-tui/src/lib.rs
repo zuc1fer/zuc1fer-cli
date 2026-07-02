@@ -74,6 +74,7 @@ pub struct App {
     auto_scroll: Cell<bool>,
     total_lines: Cell<usize>,
     view_height: Cell<usize>,
+    pub msg_area: Cell<Rect>,
 }
 
 pub struct Message {
@@ -85,6 +86,11 @@ pub enum MessageRole {
     User,
     Assistant,
     System,
+    ToolGroup {
+        title: String,
+        tools: Vec<String>,
+        expanded: bool,
+    },
 }
 
 #[derive(Clone)]
@@ -151,6 +157,7 @@ impl App {
             auto_scroll: Cell::new(true),
             total_lines: Cell::new(0),
             view_height: Cell::new(24),
+            msg_area: Cell::new(Rect::default()),
         }
     }
 
@@ -162,6 +169,27 @@ impl App {
     }
 
     pub fn add_system_message(&mut self, text: String) {
+        if text.starts_with("Running ") && text.ends_with(" tool(s)...") {
+            self.messages.push_back(Message {
+                role: MessageRole::ToolGroup {
+                    title: text,
+                    tools: Vec::new(),
+                    expanded: false,
+                },
+                text: String::new(),
+            });
+            return;
+        }
+
+        if text.starts_with("  ✔ ") || text.starts_with("  ✖ ") || text.starts_with("  [") {
+            if let Some(last_msg) = self.messages.back_mut() {
+                if let MessageRole::ToolGroup { ref mut tools, .. } = last_msg.role {
+                    tools.push(text.trim().to_string());
+                    return;
+                }
+            }
+        }
+
         self.messages.push_back(Message {
             role: MessageRole::System,
             text,
@@ -173,6 +201,35 @@ impl App {
             role: MessageRole::Assistant,
             text,
         });
+    }
+
+    pub fn handle_mouse_click(&mut self, click_x: u16, click_y: u16) {
+        let area = self.msg_area.get();
+        if click_x >= area.x && click_x < area.x + area.width
+            && click_y >= area.y && click_y < area.y + area.height
+        {
+            let relative_row = (click_y - area.y) as usize;
+            let effective_scroll = self.scroll_offset.get();
+            let clicked_line_idx = effective_scroll + relative_row;
+
+            let msg_width = area.width.saturating_sub(2) as usize;
+            let (_, line_to_msg_idx) = build_message_lines(&self.messages, msg_width);
+
+            if clicked_line_idx < line_to_msg_idx.len() {
+                let msg_idx = line_to_msg_idx[clicked_line_idx];
+                
+                // Only toggle if it's the header (the first line of the message block)
+                let is_header = clicked_line_idx == 0 || line_to_msg_idx[clicked_line_idx - 1] != msg_idx;
+                
+                if is_header {
+                    if let Some(msg) = self.messages.get_mut(msg_idx) {
+                        if let MessageRole::ToolGroup { ref mut expanded, .. } = msg.role {
+                            *expanded = !*expanded;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub fn start_streaming(&mut self) {
@@ -1279,10 +1336,10 @@ fn draw_splash(frame: &mut Frame, area: Rect) {
 }
 
 fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
+    app.msg_area.set(area);
     let msg_width = area.width.saturating_sub(2) as usize;
     let max_lines = area.height as usize;
-
-    let all_lines = build_message_lines(&app.messages, msg_width);
+    let (all_lines, _) = build_message_lines(&app.messages, msg_width);
     let total = all_lines.len();
     app.total_lines.set(total);
 
@@ -1330,15 +1387,17 @@ fn draw_messages(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 
-fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> Vec<Line<'static>> {
+fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> (Vec<Line<'static>>, Vec<usize>) {
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut line_to_msg_idx: Vec<usize> = Vec::new();
     let content_width = width.saturating_sub(2);
 
-    for msg in messages {
+    for (msg_idx, msg) in messages.iter().enumerate() {
         let (glyph, glyph_color) = match msg.role {
             MessageRole::User => ("▌ ", ACCENT_LIGHT),
             MessageRole::Assistant => ("▎ ", ACCENT_DIM),
             MessageRole::System => ("▏ ", TEXT_DIM),
+            MessageRole::ToolGroup { .. } => ("▏ ", TEXT_DIM),
         };
 
         let mut body: Vec<Line<'static>> = Vec::new();
@@ -1415,16 +1474,33 @@ fn build_message_lines(messages: &VecDeque<Message>, width: usize) -> Vec<Line<'
                     body.push(Line::from(Span::styled(w, Style::default().fg(color))));
                 }
             }
+            MessageRole::ToolGroup { ref title, ref tools, expanded } => {
+                let status_icon = if expanded { "▼ " } else { "▶ " };
+                body.push(Line::from(vec![
+                    Span::styled(status_icon, Style::default().fg(ACCENT_LIGHT)),
+                    Span::styled(title.clone(), Style::default().fg(ACCENT_DIM).add_modifier(Modifier::UNDERLINED)),
+                ]));
+                if expanded {
+                    for tool in tools {
+                        body.push(Line::from(Span::styled(
+                            format!("    {}", tool),
+                            Style::default().fg(TEXT_DIM),
+                        )));
+                    }
+                }
+            }
         }
 
         for mut line in body {
             let mut spans = vec![Span::styled(glyph, Style::default().fg(glyph_color))];
             spans.append(&mut line.spans);
             lines.push(Line::from(spans));
+            line_to_msg_idx.push(msg_idx);
         }
         lines.push(Line::from(""));
+        line_to_msg_idx.push(msg_idx);
     }
-    lines
+    (lines, line_to_msg_idx)
 }
 
 fn render_markdown_line(line: &str) -> Vec<Span<'static>> {
