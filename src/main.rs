@@ -373,6 +373,9 @@ fn run_tui(args: &[String]) -> anyhow::Result<()> {
                     match mouse.kind {
                         MouseEventKind::ScrollUp => app.handle_mouse_scroll(-1),
                         MouseEventKind::ScrollDown => app.handle_mouse_scroll(1),
+                        MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                            app.handle_mouse_click(mouse.column, mouse.row);
+                        }
                         _ => {}
                     }
                 }
